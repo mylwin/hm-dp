@@ -11,7 +11,18 @@ import lombok.Data;
  */
 @Data
 public class UserDTO {
+    /**
+     * 用户id
+     */
     private Long id;
+
+    /**
+     * 用户昵称
+     */
     private String nickName;
+
+    /**
+     * 用户头像
+     */
     private String icon;
 }

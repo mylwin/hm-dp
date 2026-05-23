@@ -17,6 +17,7 @@ public class RegexUtils {
     public static boolean isPhoneInvalid(String phone){
         return mismatch(phone, RegexPatterns.PHONE_REGEX);
     }
+
     /**
      * 是否是无效邮箱格式
      * @param email 要校验的邮箱
@@ -35,7 +36,12 @@ public class RegexUtils {
         return mismatch(code, RegexPatterns.VERIFY_CODE_REGEX);
     }
 
-    // 校验是否不符合正则格式
+    /**
+     * 校验是否不符合正则格式
+     * @param str 要校验的字符串
+     * @param regex 正则表达式
+     * @return true:符合，false：不符合
+     */
     private static boolean mismatch(String str, String regex){
         if (StrUtil.isBlank(str)) {
             return true;
