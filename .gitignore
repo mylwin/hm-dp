@@ -1,0 +1,25 @@
+# --- Claude ---
+.claude/
+
+# --- IDE ---
+.idea/
+*.iml
+
+# --- Maven ---
+backend/target/
+
+# --- Frontend: Nginx runtime & binaries ---
+frontend/nginx-1.18.0/nginx.exe
+frontend/nginx-1.18.0/logs/
+frontend/nginx-1.18.0/temp/
+frontend/nginx-1.18.0/conf/
+frontend/nginx-1.18.0/docs/
+frontend/nginx-1.18.0/contrib/
+frontend/nginx-1.18.0/html/50x.html
+frontend/nginx-1.18.0/html/index.html
+frontend/nginx-1.18.0/LICENSE
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
