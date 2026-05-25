@@ -53,13 +53,12 @@ public class UserController {
 
     /**
      * 登出功能
-     * @param session 会话
+     * @param token 用户令牌
      * @return 无
      */
     @PostMapping("/logout")
-    public Result logout(HttpSession session){
-        // 实现登出功能
-        return userService.logout(session);
+    public Result logout(@RequestHeader("authorization") String token){
+        return userService.logout(token);
     }
 
     @GetMapping("/me")

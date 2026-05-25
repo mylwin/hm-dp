@@ -33,8 +33,8 @@ public interface IUserService extends IService<User> {
 
     /**
      * 登出功能
-     * @param session 会话
+     * @param token 用户令牌
      * @return 通用结果
      */
-    Result logout(HttpSession session);
+    Result logout(String token);
 }
