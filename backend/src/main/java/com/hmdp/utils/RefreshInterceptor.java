@@ -1,29 +1,30 @@
 package com.hmdp.utils;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.StrUtil;
 import com.hmdp.dto.UserDTO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
-import static com.hmdp.utils.SystemConstants.USER_SESSION_KEY;
+import static com.hmdp.utils.RedisConstants.LOGIN_USER_TTL;
 
 /**
- * 登录拦截器
+ * redis token刷新拦截器
  *
  * @author mylwin
  * @since 2025-05-23
  */
-public class LoginInterceptor implements HandlerInterceptor {
+public class RefreshInterceptor implements HandlerInterceptor {
 
-    private StringRedisTemplate stringRedisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
 
-    public LoginInterceptor(StringRedisTemplate stringRedisTemplate) {
+    public RefreshInterceptor(StringRedisTemplate stringRedisTemplate) {
         this.stringRedisTemplate = stringRedisTemplate;
     }
 
@@ -40,14 +41,17 @@ public class LoginInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         // 1.获取请求中的token
         String token = request.getHeader("authorization");
+        // 1.1判断token是否存在，不存在直接放行，后续由登录拦截器处理
+        if (StrUtil.isBlank(token)) {
+            return true;
+        }
 
         // 2.从 redis 中获取用户
         Map<Object, Object> user = stringRedisTemplate.opsForHash().entries(LOGIN_USER_KEY + token);
 
-        // 3.如果用户不存在，返回未登录状态码
+        // 3.如果用户不存在，放行，后续由登录拦截器处理
         if (user.isEmpty()){
-            response.setStatus(401);
-            return false;
+            return true;
         }
 
         // 4.用户存在，保存到 ThreadLocal 中
@@ -56,6 +60,9 @@ public class LoginInterceptor implements HandlerInterceptor {
 
         // 4.2保存用户信息到TheadLocal中
         UserHolder.saveUser(userDTO);
+
+        // 5.刷新token时间
+        stringRedisTemplate.expire(LOGIN_USER_KEY + token, LOGIN_USER_TTL, TimeUnit.SECONDS);
 
         // 5.放行
         return true;

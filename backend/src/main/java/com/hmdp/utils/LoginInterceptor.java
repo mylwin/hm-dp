@@ -1,11 +1,16 @@
 package com.hmdp.utils;
 
+import cn.hutool.core.bean.BeanUtil;
 import com.hmdp.dto.UserDTO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.util.Map;
+
+import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
 import static com.hmdp.utils.SystemConstants.USER_SESSION_KEY;
 
 /**
@@ -26,37 +31,12 @@ public class LoginInterceptor implements HandlerInterceptor {
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        // 1.获取请求头中的 session
-        HttpSession session = request.getSession();
-
-        // 2.从 session 中获取用户
-        Object userDTO = session.getAttribute(USER_SESSION_KEY);
-
-        // 3.如果用户不存在，返回未登录状态码
-        if (userDTO == null){
+        // 1.判断ThreadLocal中是否有用户
+        if (UserHolder.getUser() == null) {
+            // 不存在则返回未登录状态码
             response.setStatus(401);
             return false;
         }
-
-        // 4.用户存在，保存到 ThreadLocal 中
-        UserHolder.saveUser((UserDTO) userDTO);
-
-        // 5.放行
         return true;
-    }
-
-    /**
-     * 在请求处理之后进行拦截
-     *
-     * @param request  请求对象
-     * @param response 响应对象
-     * @param handler  处理器
-     * @param ex       异常
-     * @throws Exception 异常
-     */
-    @Override
-    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
-        // 1.移除用户
-        UserHolder.removeUser();
     }
 }
