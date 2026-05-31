@@ -92,10 +92,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("验证码错误");
         }
 
-        // 5.从数据库中查询用户是否存在
-        LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(User::getPhone, phone);
-        User user = getOne(queryWrapper);
+        // 5.从数据库中查询用户是否存
+        User user = query().eq("phone", phone).one();
 
         // 6.如果不存在，创建并保存
         if (user == null) {

@@ -1,17 +1,9 @@
 package com.hmdp.utils;
 
-import cn.hutool.core.bean.BeanUtil;
-import com.hmdp.dto.UserDTO;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.util.Map;
-
-import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
-import static com.hmdp.utils.SystemConstants.USER_SESSION_KEY;
 
 /**
  * 登录拦截器
