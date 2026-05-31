@@ -15,8 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.concurrent.TimeUnit;
 
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_TTL;
+import static com.hmdp.utils.RedisConstants.*;
 
 /**
  * 商铺服务实现类
@@ -26,7 +25,7 @@ import static com.hmdp.utils.RedisConstants.CACHE_SHOP_TTL;
  */
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
-    
+
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
@@ -42,17 +41,22 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         String cacheShopJson = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
 
         // 2.存在，直接返回
-        if(StrUtil.isNotBlank(cacheShopJson)){
-            // 2.1将数据转为对象
-            Shop shop = BeanUtil.toBean(cacheShopJson, Shop.class);
+        if (StrUtil.isNotBlank(cacheShopJson)) {
+            Shop shop = JSONUtil.toBean(cacheShopJson, Shop.class);
             return Result.ok(shop);
+        }
+
+        // 如果缓存中的是空值，直接返回错误状态
+        if (cacheShopJson != null) {
+            return Result.fail("店铺不存在");
         }
 
         // 3.不存在，查询数据库
         Shop shop = getById(id);
 
-        // 4.数据库中不存在，返回错误状态
-        if(shop == null){
+        // 4.数据库中不存在，往redis中写入空并返回错误状态
+        if (shop == null) {
+            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
             return Result.fail("店铺不存在");
         }
 
@@ -73,7 +77,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Transactional(rollbackFor = Exception.class)
     public Result updateShop(Shop shop) {
         Long id = shop.getId();
-        if (id == null){
+        if (id == null) {
             return Result.fail("店铺id不能为空");
         }
         // 1.更新数据库
