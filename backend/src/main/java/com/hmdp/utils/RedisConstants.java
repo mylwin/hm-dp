@@ -17,6 +17,8 @@ public class RedisConstants {
     public static final Long CACHE_SHOP_TTL = 30L;
     public static final String CACHE_SHOP_KEY = "hmdp:cache:shop:";
 
+    public static final String CACHE_SHOP_TYPE_KEY = "hmdp:cache:shop:type:";
+
     public static final String LOCK_SHOP_KEY = "hmdp:lock:shop:";
     public static final Long LOCK_SHOP_TTL = 10L;
 

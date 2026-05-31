@@ -10,6 +10,9 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Mybatis配置类
+ *
+ * @author mylwin
+ * @since 2026-05-31
  */
 @Configuration
 public class MybatisConfig {
