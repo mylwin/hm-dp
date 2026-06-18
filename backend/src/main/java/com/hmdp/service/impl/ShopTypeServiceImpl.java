@@ -13,8 +13,9 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_TYPE_KEY;
+import static com.hmdp.utils.RedisConstants.*;
 
 /**
  * 商铺类型服务实现类
@@ -40,7 +41,11 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
                 .range(CACHE_SHOP_TYPE_KEY, 0, -1);
 
         // 2.存在，直接返回
-        if (!cacheSet.isEmpty()) {
+        if (cacheSet != null && !cacheSet.isEmpty()) {
+            // 如果缓存中的是空值标记，直接返回错误状态
+            if (cacheSet.size() == 1 && "".equals(cacheSet.iterator().next())) {
+                return Result.fail("商铺类型不存在");
+            }
             // 将set数据类型转换为list
             List<ShopType> shopTypeList = new ArrayList<>();
             for (String json : cacheSet) {
@@ -49,18 +54,21 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
             return Result.ok(shopTypeList);
         }
 
-        // 3.不存在，从数据库中查询
+        // 3.不存在，查询数据库
         List<ShopType> shopTypeList = list();
 
-        // 4.数据库中不存在，返回错误状态
+        // 4.数据库中不存在，往redis中写入空值标记并返回错误状态
         if (shopTypeList.isEmpty()) {
+            stringRedisTemplate.opsForZSet().add(CACHE_SHOP_TYPE_KEY, "", 0);
+            stringRedisTemplate.expire(CACHE_SHOP_TYPE_KEY, CACHE_NULL_TTL, TimeUnit.MINUTES);
             return Result.fail("商铺类型不存在");
         }
 
-        // 5.存在，将数据写入redis
+        // 5.存在，将数据库信息写入redis，设置缓存时间
         for (ShopType shopType : shopTypeList) {
             stringRedisTemplate.opsForZSet().add(CACHE_SHOP_TYPE_KEY, JSONUtil.toJsonStr(shopType), shopType.getSort());
         }
+        stringRedisTemplate.expire(CACHE_SHOP_TYPE_KEY, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         // 6.返回结果
         return Result.ok(shopTypeList);
