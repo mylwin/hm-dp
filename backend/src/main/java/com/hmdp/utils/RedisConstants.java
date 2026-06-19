@@ -22,6 +22,9 @@ public class RedisConstants {
     public static final String LOCK_SHOP_KEY = "hmdp:lock:shop:";
     public static final Long LOCK_SHOP_TTL = 10L;
 
+    public static final String LOCK_KEY = "hmdp:lock:";
+    public static final Long LOCK_TTL = 10L;
+
     public static final String SECKILL_STOCK_KEY = "hmdp:seckill:stock:";
     public static final String BLOG_LIKED_KEY = "hmdp:blog:liked:";
     public static final String FEED_KEY = "hmdp:feed:";
