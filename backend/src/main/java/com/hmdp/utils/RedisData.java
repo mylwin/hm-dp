@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
  * @since 2026-05-23
  */
 @Data
-public class RedisData {
+public class RedisData<T> {
     private LocalDateTime expireTime;
-    private Object data;
+    private T data;
 }
