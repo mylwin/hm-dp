@@ -23,3 +23,5 @@ frontend/nginx-1.18.0/LICENSE
 .DS_Store
 Thumbs.db
 desktop.ini
+/docs/
+/backend/jmeter.log
