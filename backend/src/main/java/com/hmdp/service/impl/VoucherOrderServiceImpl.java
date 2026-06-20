@@ -10,6 +10,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +34,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private RedisIdWorker redisIdWorker;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public Result seckillVoucher(Long voucherId) {
         // 1.根据ID查询优惠券信息
         SeckillVoucher seckillVoucher = seckillVoucherService.getById(voucherId);
@@ -54,7 +54,30 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("库存不足！");
         }
 
-        // 5.扣减库存（乐观锁确保不会超卖）
+        // 5.添加悲观锁，确保一人一单
+        Long userID = UserHolder.getUser().getId();
+        // 由于user对象虽然内容一样，但是其实是不同对象（地址不同），所以需要使用intern()方法，这样确保锁的唯一性
+        synchronized (userID.toString().intern()){
+            // @Transactional 自调用问题（本质：目标对象内部的方法调用本对象的另一个带事务注解的方法）在运行时不会生效。
+            // 因此需要使用AopContext.currentProxy()获取当前代理对象，从而调用带事务注解的方法，从而开启真正的事务。
+            IVoucherOrderService currentProxy = (IVoucherOrderService) AopContext.currentProxy();
+            return currentProxy.createVoucherOrder(voucherId);
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Result createVoucherOrder(Long voucherId) {
+        // 1.当前用户是否已经购买过该优惠券
+        Long userID = UserHolder.getUser().getId();
+        Long count = query()
+                .eq("user_id", userID)
+                .eq("voucher_id", voucherId)
+                .count();
+        if(count > 0){
+            return Result.fail("用户已购买过该优惠券！");
+        }
+
+        // 2.扣减库存（乐观锁确保不会超卖）
         boolean success = seckillVoucherService.update()
                 .setSql("stock = stock - 1")
                 .eq("voucher_id", voucherId)
@@ -64,14 +87,14 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("库存不足！");
         }
 
-        // 6.创建订单
+        // 3.创建订单
         VoucherOrder voucherOrder = new VoucherOrder();
         voucherOrder.setId(redisIdWorker.getNextId("voucher_order"));
-        voucherOrder.setUserId(UserHolder.getUser().getId());
+        voucherOrder.setUserId(userID);
         voucherOrder.setVoucherId(voucherId);
         save(voucherOrder);
 
-        // 7.返回订单ID
+        // 4.返回订单ID
         return Result.ok(voucherOrder.getId());
     }
 }
