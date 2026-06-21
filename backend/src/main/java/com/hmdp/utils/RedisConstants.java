@@ -1,5 +1,7 @@
 package com.hmdp.utils;
 
+import cn.hutool.core.lang.UUID;
+
 /**
  * Redis 常量
  *
@@ -24,6 +26,8 @@ public class RedisConstants {
 
     public static final String LOCK_KEY = "hmdp:lock:";
     public static final Long LOCK_TTL = 10L;
+
+    public static final String ID_PREFIX_KEY = UUID.randomUUID().toString(true);
 
     public static final String SECKILL_STOCK_KEY = "hmdp:seckill:stock:";
     public static final String BLOG_LIKED_KEY = "hmdp:blog:liked:";
