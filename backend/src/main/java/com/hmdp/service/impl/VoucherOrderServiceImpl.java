@@ -8,10 +8,12 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -31,8 +33,17 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private ISeckillVoucherService seckillVoucherService;
 
     @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Autowired
     private RedisIdWorker redisIdWorker;
 
+    /**
+     * 秒杀优惠券订单
+     *
+     * @param voucherId 优惠券ID
+     * @return 结果
+     */
     @Override
     public Result seckillVoucher(Long voucherId) {
         // 1.根据ID查询优惠券信息
@@ -40,31 +51,46 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         // 2.判断秒杀活动是否开始
         LocalDateTime now = LocalDateTime.now();
-        if(seckillVoucher.getBeginTime().isAfter(now)){
+        if (seckillVoucher.getBeginTime().isAfter(now)) {
             return Result.fail("秒杀活动未开始！");
         }
 
         // 3.判断秒杀活动是否结束
-        if(seckillVoucher.getEndTime().isBefore(now)){
+        if (seckillVoucher.getEndTime().isBefore(now)) {
             return Result.fail("秒杀活动已结束！");
         }
 
         // 4.判断当前优惠券库存是否充足
-        if(seckillVoucher.getStock() < 1){
+        if (seckillVoucher.getStock() < 1) {
             return Result.fail("库存不足！");
         }
 
-        // 5.添加悲观锁，确保一人一单
+        // 5.添加redis分布式锁，确保一人一单
         Long userID = UserHolder.getUser().getId();
-        // 由于user对象虽然内容一样，但是其实是不同对象（地址不同），所以需要使用intern()方法，这样确保锁的唯一性
-        synchronized (userID.toString().intern()){
+        // 5.1尝试获取锁
+        SimpleRedisLock simpleRedisLock = new SimpleRedisLock("seckill_voucher:" + voucherId + ":" + userID, stringRedisTemplate);
+        boolean isLock = simpleRedisLock.tryLock(1200L);
+        if (!isLock) {
+            // 5.2获取锁失败
+            return Result.fail("请勿重复下单！");
+        }
+        try {
             // @Transactional 自调用问题（本质：目标对象内部的方法调用本对象的另一个带事务注解的方法）在运行时不会生效。
             // 因此需要使用AopContext.currentProxy()获取当前代理对象，从而调用带事务注解的方法，从而开启真正的事务。
             IVoucherOrderService currentProxy = (IVoucherOrderService) AopContext.currentProxy();
             return currentProxy.createVoucherOrder(voucherId);
+        } finally {
+            // 5.3释放锁
+            simpleRedisLock.unlock();
         }
     }
 
+    /**
+     * 创建优惠券订单
+     *
+     * @param voucherId 优惠券ID
+     * @return 结果
+     */
     @Transactional(rollbackFor = Exception.class)
     public Result createVoucherOrder(Long voucherId) {
         // 1.当前用户是否已经购买过该优惠券
@@ -73,7 +99,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .eq("user_id", userID)
                 .eq("voucher_id", voucherId)
                 .count();
-        if(count > 0){
+        if (count > 0) {
             return Result.fail("用户已购买过该优惠券！");
         }
 
@@ -83,7 +109,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .eq("voucher_id", voucherId)
                 .gt("stock", 0)
                 .update();
-        if(!success){
+        if (!success) {
             return Result.fail("库存不足！");
         }
 
