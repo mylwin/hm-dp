@@ -1,7 +1,11 @@
 package com.hmdp.utils;
 
 import lombok.AllArgsConstructor;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.RedisConstants.ID_PREFIX_KEY;
@@ -23,6 +27,17 @@ public class SimpleRedisLock implements ILock{
     private StringRedisTemplate stringRedisTemplate;
 
     /**
+     * 释放锁的lua脚本
+     */
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
+
+    static {
+        UNLOCK_SCRIPT = new DefaultRedisScript<>();
+        UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
+        UNLOCK_SCRIPT.setResultType(Long.class);
+    }
+
+    /**
      * 尝试获取锁
      * @param timeoutSec 锁的过期时间，单位为秒
      * @return 是否获取成功，true表示获取成功，false表示获取失败
@@ -40,9 +55,20 @@ public class SimpleRedisLock implements ILock{
     }
 
     /**
-     * 释放锁
+     * 释放锁（利用lua脚本）
      */
     @Override
+    public void unlock() {
+        stringRedisTemplate.execute(
+                UNLOCK_SCRIPT,
+                Collections.singletonList(LOCK_KEY + name),
+                ID_PREFIX_KEY + Thread.currentThread().getId());
+    }
+
+    /**
+     * 释放锁
+     */
+    /*@Override
     public void unlock() {
         // 得到锁的值
         String value = stringRedisTemplate.opsForValue().get(LOCK_KEY + name);
@@ -53,5 +79,5 @@ public class SimpleRedisLock implements ILock{
             // 释放锁
             stringRedisTemplate.delete(LOCK_KEY + name);
         }
-    }
+    }*/
 }
