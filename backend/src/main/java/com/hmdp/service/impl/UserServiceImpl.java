@@ -4,7 +4,6 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
@@ -103,7 +102,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
         // 7.保存用户到 redis 中（redis 中只保存用户不敏感的信息）
         // 7.1为用户生成token
-        String token = UUID.fastUUID().toString();
+        String token = UUID.fastUUID().toString(true);
 
         // 7.2将用户对象转换为HashMap
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
