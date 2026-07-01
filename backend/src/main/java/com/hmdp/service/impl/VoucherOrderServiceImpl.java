@@ -11,6 +11,8 @@ import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -19,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
+
+import static com.hmdp.utils.RedisConstants.LOCK_KEY;
 
 /**
  * 优惠券订单服务实现类
@@ -37,6 +41,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Autowired
     private RedisIdWorker redisIdWorker;
+
+    @Autowired
+    private RedissonClient redissonClient;
 
     /**
      * 秒杀优惠券订单
@@ -68,8 +75,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 5.添加redis分布式锁，确保一人一单
         Long userID = UserHolder.getUser().getId();
         // 5.1尝试获取锁
-        SimpleRedisLock simpleRedisLock = new SimpleRedisLock("seckill_voucher:" + voucherId + ":" + userID, stringRedisTemplate);
-        boolean isLock = simpleRedisLock.tryLock(1200L);
+        // SimpleRedisLock simpleRedisLock = new SimpleRedisLock("seckill_voucher:" + voucherId + ":" + userID, stringRedisTemplate);
+        RLock lock = redissonClient.getLock(LOCK_KEY + "seckill_voucher:" + voucherId + ":" + userID);
+        boolean isLock = lock.tryLock();
         if (!isLock) {
             // 5.2获取锁失败
             return Result.fail("请勿重复下单！");
@@ -81,7 +89,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return currentProxy.createVoucherOrder(voucherId);
         } finally {
             // 5.3释放锁
-            simpleRedisLock.unlock();
+            lock.unlock();
         }
     }
 
