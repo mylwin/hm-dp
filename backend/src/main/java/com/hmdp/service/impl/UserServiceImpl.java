@@ -83,13 +83,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("手机号格式错误");
         }
 
-        // 3.验证验证码是否合法
-        String code = loginForm.getCode();
-        String cacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
-        if (!cacheCode.equals(code)) {
-            // 4.如果不合法，返回错误
-            return Result.fail("验证码错误");
-        }
+//        // 3.验证验证码是否合法
+//        String code = loginForm.getCode();
+//        String cacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
+//        if (!cacheCode.equals(code)) {
+//            // 4.如果不合法，返回错误
+//            return Result.fail("验证码错误");
+//        }
 
         // 5.从数据库中查询用户是否存
         User user = query().eq("phone", phone).one();
