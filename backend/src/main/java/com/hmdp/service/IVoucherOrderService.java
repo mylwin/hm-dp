@@ -23,6 +23,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
      * 创建优惠券订单
      *
      * @param voucherOrder 优惠券订单
+     * @return true表示创建成功，false表示创建失败
      */
-    void createVoucherOrder(VoucherOrder voucherOrder);
+    boolean createVoucherOrder(VoucherOrder voucherOrder);
 }

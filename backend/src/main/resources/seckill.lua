@@ -4,6 +4,8 @@
 local voucherId = ARGV[1]
 -- 1.2 用户id
 local userId = ARGV[2]
+-- 1.3 订单id
+local orderId = ARGV[3]
 
 -- 2.数据key
 -- 2.1 优惠券库存key
@@ -26,5 +28,7 @@ end
 redis.call("incrby", seckillStockKey, -1)
 -- 3.6 将userId保存到优惠券的set集合中
 redis.call("sadd", seckillOrderKey, userId)
--- 3.7 秒杀成功，返回0
+-- 3.7 将订单信息保存到消息队列中 xadd hmdp:stream:orders * k1 v1 k2 v2
+redis.call("xadd", "hmdp:stream:orders", "*", "userId", userId, "voucherId", voucherId, "Id", orderId)
+-- 3.8 秒杀成功，返回0
 return 0
