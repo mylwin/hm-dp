@@ -29,6 +29,6 @@ redis.call("incrby", seckillStockKey, -1)
 -- 3.6 将userId保存到优惠券的set集合中
 redis.call("sadd", seckillOrderKey, userId)
 -- 3.7 将订单信息保存到消息队列中 xadd hmdp:stream:orders * k1 v1 k2 v2
-redis.call("xadd", "hmdp:stream:orders", "*", "userId", userId, "voucherId", voucherId, "Id", orderId)
+redis.call("xadd", "hmdp:stream:orders", "*", "userId", userId, "voucherId", voucherId, "id", orderId)
 -- 3.8 秒杀成功，返回0
 return 0
