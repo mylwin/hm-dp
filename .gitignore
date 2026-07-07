@@ -25,3 +25,4 @@ Thumbs.db
 desktop.ini
 /docs/
 /backend/jmeter.log
+/backend/src/main/resources/application-dev.yaml

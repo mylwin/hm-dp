@@ -1,6 +1,8 @@
 server:
   port: 8081
 spring:
+  profiles:
+    active: dev
   application:
     name: hmdp
   datasource:
@@ -27,3 +29,10 @@ mybatis-plus:
 logging:
   level:
     com.hmdp: debug
+
+aliyun:
+  oss:
+    endpoint: oss-cn-hangzhou.aliyuncs.com
+    access-key-id: ${dev.access-key-id}
+    access-key-secret: ${dev.access-key-secret}
+    bucket-name: ${dev.bucket-name}
