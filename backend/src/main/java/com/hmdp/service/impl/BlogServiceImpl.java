@@ -12,13 +12,17 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
+import static com.hmdp.utils.RedisConstants.LOCK_KEY;
 
 /**
  * 探店笔记服务实现类
@@ -33,6 +37,9 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    @Autowired
+    private RedissonClient redissonClient;
 
     /**
      * 根据id查询探店笔记
@@ -53,6 +60,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
         // 3.添加用户是否对博客点赞
         setLikedStatus(blog);
+
         return Result.ok(blog);
     }
 
@@ -68,15 +76,20 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         Page<Blog> page = query()
                 .orderByDesc("liked")
                 .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+
         // 获取当前页数据
         List<Blog> records = page.getRecords();
+
         // 查询用户
-        records.forEach(this::queryBlogUser);
+        records.forEach(blog -> {
+            queryBlogUser(blog);
+            setLikedStatus(blog);
+        });
         return Result.ok(records);
     }
 
     /**
-     * 点赞
+     * 点赞/取消点赞（Redisson分布式锁保证同一用户串行，Toggle语义安全）
      *
      * @param id 博客id
      * @return 结果
@@ -89,29 +102,39 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             return Result.fail("请先登录");
         }
 
-        // 2.判断用户是否已经点赞
-        String key = BLOG_LIKED_KEY + id;
-        Boolean isMember = stringRedisTemplate.opsForSet().isMember(key, user.getId().toString());
-
-        // 3.如果未点赞，则可以点赞
-        if (BooleanUtil.isFalse(isMember)) {
-            // 3.1 数据库操作，点赞数+1
-            boolean success = update().setSql("liked = liked + 1").eq("id", id).update();
-            // 3.2 保存用户id到redis集合中
-            if (success) {
-                stringRedisTemplate.opsForSet().add(key, user.getId().toString());
+        String userId = user.getId().toString();
+        // 锁粒度：用户+博客，不同用户互不影响
+        String lockKey = LOCK_KEY + "blog:like:" + id + ":" + userId;
+        RLock lock = redissonClient.getLock(lockKey);
+        try {
+            // 尝试获取锁，最多等待1秒，锁3秒后自动释放（防止死锁）
+            if (!lock.tryLock(1, 3, TimeUnit.SECONDS)) {
+                return Result.fail("操作过于频繁，请稍后再试");
             }
-        } else {
-            // 4.如果已经点赞，则取消点赞
-            // 4.1 数据库操作，点赞数-1
-            boolean success = update().setSql("liked = liked - 1").eq("id", id).update();
-            // 4.2 从redis集合中删除用户id
-            if (success) {
-                stringRedisTemplate.opsForSet().remove(key, user.getId().toString());
+
+            String key = BLOG_LIKED_KEY + id;
+            // 在锁内检查当前状态，保证Toggle语义正确
+            Boolean isMember = stringRedisTemplate.opsForSet().isMember(key, userId);
+
+            if (BooleanUtil.isFalse(isMember)) {
+                // 未点赞 → 点赞
+                update().setSql("liked = liked + 1").eq("id", id).update();
+                stringRedisTemplate.opsForSet().add(key, userId);
+            } else {
+                // 已点赞 → 取消点赞
+                update().setSql("liked = liked - 1").eq("id", id).update();
+                stringRedisTemplate.opsForSet().remove(key, userId);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return Result.fail("操作失败");
+        } finally {
+            // 释放锁（确保是当前线程持有的锁）
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
             }
         }
 
-        // 5.返回结果
         return Result.ok();
     }
 
