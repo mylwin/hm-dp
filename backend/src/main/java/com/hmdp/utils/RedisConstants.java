@@ -34,6 +34,7 @@ public class RedisConstants {
     public static final String ORDER_MQ = "hmdp:stream:orders";
 
     public static final String BLOG_LIKED_KEY = "hmdp:blog:liked:";
+
     public static final String FEED_KEY = "hmdp:feed:";
     public static final String SHOP_GEO_KEY = "hmdp:shop:geo:";
     public static final String USER_SIGN_KEY = "hmdp:sign:";
