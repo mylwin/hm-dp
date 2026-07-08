@@ -1,15 +1,18 @@
 package com.hmdp.controller;
 
 
+import cn.hutool.core.bean.BeanUtil;
 import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
+import com.hmdp.entity.User;
 import com.hmdp.entity.UserInfo;
 import com.hmdp.service.IUserInfoService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.UserHolder;
 import jakarta.servlet.http.HttpSession;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -61,6 +64,10 @@ public class UserController {
         return userService.logout(token);
     }
 
+    /**
+     * 获取当前登录用户
+     * @return 当前登录用户
+     */
     @GetMapping("/me")
     public Result me(){
         // 获取当前登录用户
@@ -68,6 +75,11 @@ public class UserController {
         return Result.ok(userDTO);
     }
 
+    /**
+     * 根据id获取用户信息
+     * @param userId 用户id
+     * @return 用户信息
+     */
     @GetMapping("/info/{id}")
     public Result info(@PathVariable("id") Long userId){
         // 查询详情
@@ -80,5 +92,18 @@ public class UserController {
         info.setUpdateTime(null);
         // 返回
         return Result.ok(info);
+    }
+
+    @GetMapping("/{id}")
+    public Result queryByUserId(@PathVariable("id") Long userId){
+        // 1.查询用户
+        User user = userService.getById(userId);
+        if(user == null){
+            return Result.ok();
+        }
+
+        // 2.返回结果
+        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+        return Result.ok(userDTO);
     }
 }
