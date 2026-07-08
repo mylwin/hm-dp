@@ -96,7 +96,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
      */
     @Override
     public Result likeBlog(Long id) {
-        // 1.获取登录用户
+        // 获取登录用户
         UserDTO user = UserHolder.getUser();
         if (user == null) {
             return Result.fail("请先登录");
@@ -111,19 +111,17 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             if (!lock.tryLock(1, 3, TimeUnit.SECONDS)) {
                 return Result.fail("操作过于频繁，请稍后再试");
             }
-
             String key = BLOG_LIKED_KEY + id;
             // 在锁内检查当前状态，保证Toggle语义正确
-            Boolean isMember = stringRedisTemplate.opsForSet().isMember(key, userId);
-
-            if (BooleanUtil.isFalse(isMember)) {
+            Double score = stringRedisTemplate.opsForZSet().score(key, userId);
+            if (score == null) {
                 // 未点赞 → 点赞
                 update().setSql("liked = liked + 1").eq("id", id).update();
-                stringRedisTemplate.opsForSet().add(key, userId);
+                stringRedisTemplate.opsForZSet().add(key, userId, System.currentTimeMillis());
             } else {
                 // 已点赞 → 取消点赞
                 update().setSql("liked = liked - 1").eq("id", id).update();
-                stringRedisTemplate.opsForSet().remove(key, userId);
+                stringRedisTemplate.opsForZSet().remove(key, userId);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -134,7 +132,6 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
                 lock.unlock();
             }
         }
-
         return Result.ok();
     }
 
@@ -144,14 +141,13 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
      * @param id 博客id
      * @return true表示在点赞列表中，false表示不在点赞列表中
      */
-    private Boolean isMember(Long id){
+    private Boolean isMember(Long id) {
         // 获取用户
         UserDTO user = UserHolder.getUser();
         if (user == null) return false;
-
         // 判断用户是否在点赞列表中
         String key = BLOG_LIKED_KEY + id;
-        return stringRedisTemplate.opsForSet().isMember(key, user.getId().toString());
+        return stringRedisTemplate.opsForZSet().score(key, user.getId().toString()) != null;
     }
 
     /**
