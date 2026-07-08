@@ -26,3 +26,6 @@ desktop.ini
 /docs/
 /backend/jmeter.log
 /backend/src/main/resources/application-dev.yaml
+/frontend/nginx-1.18.0/jmeter.log
+/jmeter.log
+*.sh
