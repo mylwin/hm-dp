@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.BooleanUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
@@ -18,8 +19,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
 import static com.hmdp.utils.RedisConstants.LOCK_KEY;
@@ -133,6 +139,45 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             }
         }
         return Result.ok();
+    }
+
+    /**
+     * 查询点赞列表（按照时间顺序）
+     *
+     * @param id 博客id
+     * @return 点赞列表
+     */
+    @Override
+    public Result queryBlogLikes(Long id) {
+        // 1.判断key是否有效
+        if(id == null || id <= 0) return Result.fail("博客不存在");
+
+        // 2.获取用户id列表
+        String key = BLOG_LIKED_KEY + id;
+        // 查询前5个用户
+        Set<String> userTop5 = stringRedisTemplate.opsForZSet().range(key, 0, 4);
+        if(userTop5 == null || userTop5.isEmpty()){
+            return Result.ok(Collections.emptyList());
+        }
+
+        // 3.解析用户数据
+        List<Long> userIds = userTop5.stream()
+                .map(Long::valueOf)
+                .toList();
+
+        // 4.批量查询用户信息
+        List<User> users = userService.listByIds(userIds);
+
+        // 5.对查询结果数据排序
+        // 5.1 获取用户id和用户本地的映射列表
+        Map<Long, User> userMap = users.stream()
+                .collect(Collectors.toMap(User::getId, Function.identity()));
+        // 5.2 将用户信息转换为UserDTO并排序
+        List<UserDTO> userDTOs = userIds.stream()
+                .map(userMap::get)
+                .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
+                .collect(Collectors.toList());
+        return Result.ok(userDTOs);
     }
 
     /**
