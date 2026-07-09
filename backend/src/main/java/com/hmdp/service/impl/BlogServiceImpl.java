@@ -2,14 +2,17 @@ package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.BooleanUtil;
+import cn.hutool.log.Log;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
+import com.hmdp.entity.Follow;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.BlogMapper;
 import com.hmdp.service.IBlogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.service.IFollowService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
@@ -17,18 +20,18 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
-import static com.hmdp.utils.RedisConstants.LOCK_KEY;
+import static com.hmdp.utils.RedisConstants.*;
+
+import com.hmdp.dto.ScrollResult;
 
 /**
  * 探店笔记服务实现类
@@ -40,6 +43,9 @@ import static com.hmdp.utils.RedisConstants.LOCK_KEY;
 public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IBlogService {
     @Autowired
     private IUserService userService;
+
+    @Autowired
+    private IFollowService followService;
 
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
@@ -206,7 +212,100 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
      */
     @Override
     public Result queryBlogOfFollow(Long max, Integer offset) {
-        return null;
+        // 1.获取当前登录用户
+        UserDTO user = UserHolder.getUser();
+        if (user == null) {
+            return Result.fail("请先登录");
+        }
+        // 2.查询收件箱
+        String key = FEED_KEY + user.getId();
+        Set<ZSetOperations.TypedTuple<String>> typedTuples = stringRedisTemplate.opsForZSet()
+                .reverseRangeByScoreWithScores(key, 0, max, offset, 3);
+
+        // 3.数据判断
+        if (typedTuples == null || typedTuples.isEmpty()) {
+            return Result.ok();
+        }
+
+        // 4.解析数据
+        List<Long> blogIds = new ArrayList<>(typedTuples.size());
+        long minTime = 0L;  // 最小时间，因为时间不会为0
+        int os = 1;  // 偏移量，开始默认是0；查询的数据中的分数如果有几个等于最小值，那么偏移量为几
+        for (ZSetOperations.TypedTuple<String> typedTuple : typedTuples) {
+            // 4.1获取博客id
+            blogIds.add(Long.valueOf(Objects.requireNonNull(typedTuple.getValue())));
+
+            // 4.2获取分数（时间戳）
+            long score = Objects.requireNonNull(typedTuple.getScore()).longValue();
+            if(score == minTime){
+                // 如果分数等于最小时间，则偏移量加1
+                os++;
+            }else{
+                // 如果分数不等于最小时间，则更新最小时间，并将偏移量置为1
+                minTime = score;
+                os = 1;
+            }
+        }
+
+        // 5.查询博客（DB返回顺序不确定，需按Redis顺序重排）
+        List<Blog> blogsFromDb = listByIds(blogIds);
+        // 5.1 构建id→blog映射
+        Map<Long, Blog> blogMap = blogsFromDb.stream()
+                .collect(Collectors.toMap(Blog::getId, Function.identity()));
+        // 5.2 按Redis ZSet倒序重排，保证与收件箱顺序一致
+        List<Blog> sortedBlogs = blogIds.stream()
+                .map(blogMap::get)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        // 6.补充用户信息和点赞状态
+        sortedBlogs.forEach(blog -> {
+            queryBlogUser(blog);
+            setLikedStatus(blog);
+        });
+
+        // 7.封装滚动分页结果
+        ScrollResult scrollResult = new ScrollResult();
+        scrollResult.setList(sortedBlogs);
+        scrollResult.setMinTime(minTime);
+        scrollResult.setOffset(os);
+        return Result.ok(scrollResult);
+    }
+
+    /**
+     * 保存博客
+     *
+     * @param blog 博客
+     * @return 结果
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Result saveBlog(Blog blog) {
+        // 1.获取登录用户
+        UserDTO user = UserHolder.getUser();
+        if (user == null) {
+            return Result.fail("请先登录");
+        }
+        blog.setUserId(user.getId());
+
+        // 2.保存探店博文
+        boolean success = save(blog);
+        if (!success) {
+            return Result.fail("博客保存失败");
+        }
+
+        // 3.获取当前用户的所有粉丝
+        List<Follow> fans = followService.query().eq("follow_user_id", user.getId()).list();
+
+        // 4.为所有粉丝的收件箱推送本次的博客id
+        fans.forEach(fan ->{
+            Long userId = fan.getUserId();
+            String key = FEED_KEY + userId;
+            stringRedisTemplate.opsForZSet().add(key, blog.getId().toString(), System.currentTimeMillis());
+        });
+
+        // 5.返回博客id
+        return Result.ok(blog.getId());
     }
 
     /**

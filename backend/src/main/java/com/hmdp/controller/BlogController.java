@@ -23,11 +23,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/blog")
 public class BlogController {
-
     @Resource
     private IBlogService blogService;
-    @Resource
-    private IUserService userService;
 
     /**
      * 保存博客
@@ -37,13 +34,7 @@ public class BlogController {
      */
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
-        // 获取登录用户
-        UserDTO user = UserHolder.getUser();
-        blog.setUserId(user.getId());
-        // 保存探店博文
-        blogService.save(blog);
-        // 返回id
-        return Result.ok(blog.getId());
+        return blogService.saveBlog(blog);
     }
 
     /**
