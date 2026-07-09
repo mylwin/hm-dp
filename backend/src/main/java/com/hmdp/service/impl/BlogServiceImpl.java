@@ -181,7 +181,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     }
 
     /**
-     * 根据用户id查询博客列表（含用户信息和点赞状态）
+     * 根据用户id查询博客列表
      *
      * @param id      用户id
      * @param current 当前页
@@ -194,11 +194,19 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
                 .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
 
         List<Blog> records = page.getRecords();
-        records.forEach(blog -> {
-            queryBlogUser(blog);
-            setLikedStatus(blog);
-        });
         return Result.ok(records);
+    }
+
+    /**
+     * 查询关注的博主的博客（滚动分页）
+     *
+     * @param max     最新时间
+     * @param offset  偏移量
+     * @return 博客列表
+     */
+    @Override
+    public Result queryBlogOfFollow(Long max, Integer offset) {
+        return null;
     }
 
     /**

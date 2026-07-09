@@ -51,4 +51,13 @@ public interface IBlogService extends IService<Blog> {
      * @return 博客列表
      */
     Result queryBlogByUserId(Long id, Integer current);
+
+    /**
+     * 查询关注的用户博客（滚动分页）
+     *
+     * @param max    最新时间戳
+     * @param offset 偏移量
+     * @return 博客列表
+     */
+    Result queryBlogOfFollow(Long max, Integer offset);
 }

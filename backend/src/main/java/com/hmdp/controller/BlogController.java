@@ -69,7 +69,8 @@ public class BlogController {
         UserDTO user = UserHolder.getUser();
         // 根据用户查询
         Page<Blog> page = blogService.query()
-                .eq("user_id", user.getId()).page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+                .eq("user_id", user.getId())
+                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 获取当前页数据
         List<Blog> records = page.getRecords();
         return Result.ok(records);
@@ -120,5 +121,19 @@ public class BlogController {
             @RequestParam("id") Long id,
             @RequestParam(value = "current", defaultValue = "1") Integer current){
         return blogService.queryBlogByUserId(id, current);
+    }
+
+    /**
+     * 查询关注的用户博客（滚动分页）
+     *
+     * @param max 最新时间戳
+     * @param offset 偏移量
+     * @return 博客列表
+     */
+    @GetMapping("/of/follow")
+    public Result queryBlogOfFollow(
+            @RequestParam(value = "lastId") Long max,
+            @RequestParam(value = "offset", defaultValue = "0") Integer offset){
+        return blogService.queryBlogOfFollow(max, offset);
     }
 }
