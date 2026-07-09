@@ -108,19 +108,17 @@ public class BlogController {
         return blogService.queryBlogLikes(id);
     }
 
+    /**
+     * 查询用户博客
+     *
+     * @param id 用户id
+     * @param current 当前页
+     * @return 博客列表
+     */
     @GetMapping("/of/user")
     public Result queryBlogByUserId(
             @RequestParam("id") Long id,
             @RequestParam(value = "current", defaultValue = "1") Integer current){
-       // 1.根据用户查询
-       Page<Blog> page = blogService.query()
-               .eq("user_id", id)
-               .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
-
-       // 2.获取当前页数据
-       List<Blog> records = page.getRecords();
-
-       // 3.返回结果
-       return Result.ok(records);
+        return blogService.queryBlogByUserId(id, current);
     }
 }

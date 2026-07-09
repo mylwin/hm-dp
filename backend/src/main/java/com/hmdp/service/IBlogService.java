@@ -42,4 +42,13 @@ public interface IBlogService extends IService<Blog> {
      * @return 点赞列表
      */
     Result queryBlogLikes(Long id);
+
+    /**
+     * 根据用户id查询博客列表
+     *
+     * @param id      用户id
+     * @param current 当前页
+     * @return 博客列表
+     */
+    Result queryBlogByUserId(Long id, Integer current);
 }

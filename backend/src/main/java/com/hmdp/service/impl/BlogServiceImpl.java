@@ -181,6 +181,27 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     }
 
     /**
+     * 根据用户id查询博客列表（含用户信息和点赞状态）
+     *
+     * @param id      用户id
+     * @param current 当前页
+     * @return 博客列表
+     */
+    @Override
+    public Result queryBlogByUserId(Long id, Integer current) {
+        Page<Blog> page = query()
+                .eq("user_id", id)
+                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+
+        List<Blog> records = page.getRecords();
+        records.forEach(blog -> {
+            queryBlogUser(blog);
+            setLikedStatus(blog);
+        });
+        return Result.ok(records);
+    }
+
+    /**
      * 判断用户是否在点赞列表中
      *
      * @param id 博客id
