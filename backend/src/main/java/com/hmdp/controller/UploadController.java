@@ -20,6 +20,8 @@ import java.util.UUID;
 @RestController
 @RequestMapping("upload")
 public class UploadController {
+    private static final long MAX_BLOG_IMAGE_SIZE = 100L * 1024 * 1024;
+
     @Autowired
     private OssService ossService;
 
@@ -34,6 +36,9 @@ public class UploadController {
         // 校验文件是否为空
         if (file.isEmpty()) {
             return Result.fail("上传文件不能为空");
+        }
+        if (file.getSize() > MAX_BLOG_IMAGE_SIZE) {
+            return Result.fail("上传文件不能超过100MB");
         }
         try {
             String originalFilename = file.getOriginalFilename();

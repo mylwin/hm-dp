@@ -5,6 +5,10 @@ spring:
     active: dev
   application:
     name: hmdp
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
   datasource:
     druid:
       driver-class-name: com.mysql.cj.jdbc.Driver
