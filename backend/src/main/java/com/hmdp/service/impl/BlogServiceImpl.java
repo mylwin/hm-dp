@@ -128,12 +128,16 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             Double score = stringRedisTemplate.opsForZSet().score(key, userId);
             if (score == null) {
                 // 未点赞 → 点赞
-                update().setSql("liked = liked + 1").eq("id", id).update();
-                stringRedisTemplate.opsForZSet().add(key, userId, System.currentTimeMillis());
+                boolean success = update().setSql("liked = liked + 1").eq("id", id).update();
+                if (success) {
+                    stringRedisTemplate.opsForZSet().add(key, userId, System.currentTimeMillis());
+                }
             } else {
                 // 已点赞 → 取消点赞
-                update().setSql("liked = liked - 1").eq("id", id).update();
-                stringRedisTemplate.opsForZSet().remove(key, userId);
+                boolean success = update().setSql("liked = liked - 1").eq("id", id).update();
+                if (success) {
+                    stringRedisTemplate.opsForZSet().remove(key, userId);
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -156,13 +160,13 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Override
     public Result queryBlogLikes(Long id) {
         // 1.判断key是否有效
-        if(id == null || id <= 0) return Result.fail("博客不存在");
+        if (id == null || id <= 0) return Result.fail("博客不存在");
 
         // 2.获取用户id列表
         String key = BLOG_LIKED_KEY + id;
         // 查询前5个用户
         Set<String> userTop5 = stringRedisTemplate.opsForZSet().range(key, 0, 4);
-        if(userTop5 == null || userTop5.isEmpty()){
+        if (userTop5 == null || userTop5.isEmpty()) {
             return Result.ok(Collections.emptyList());
         }
 
@@ -206,8 +210,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     /**
      * 查询关注的博主的博客（滚动分页）
      *
-     * @param max     最新时间
-     * @param offset  偏移量
+     * @param max    最新时间
+     * @param offset 偏移量
      * @return 博客列表
      */
     @Override
@@ -230,17 +234,17 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         // 4.解析数据
         List<Long> blogIds = new ArrayList<>(typedTuples.size());
         long minTime = 0L;  // 最小时间，因为时间不会为0
-        int os = 1;  // 偏移量，开始默认是0；查询的数据中的分数如果有几个等于最小值，那么偏移量为几
+        int os = 1;  // 偏移量，开始默认是0；查询的数据中的分数如果有几个等于最小值，那么偏移量为几；下一次查询数据中至少有一个等于最小值，因此为1
         for (ZSetOperations.TypedTuple<String> typedTuple : typedTuples) {
             // 4.1获取博客id
             blogIds.add(Long.valueOf(Objects.requireNonNull(typedTuple.getValue())));
 
             // 4.2获取分数（时间戳）
             long score = Objects.requireNonNull(typedTuple.getScore()).longValue();
-            if(score == minTime){
+            if (score == minTime) {
                 // 如果分数等于最小时间，则偏移量加1
                 os++;
-            }else{
+            } else {
                 // 如果分数不等于最小时间，则更新最小时间，并将偏移量置为1
                 minTime = score;
                 os = 1;
@@ -298,7 +302,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         List<Follow> fans = followService.query().eq("follow_user_id", user.getId()).list();
 
         // 4.为所有粉丝的收件箱推送本次的博客id
-        fans.forEach(fan ->{
+        fans.forEach(fan -> {
             Long userId = fan.getUserId();
             String key = FEED_KEY + userId;
             stringRedisTemplate.opsForZSet().add(key, blog.getId().toString(), System.currentTimeMillis());
