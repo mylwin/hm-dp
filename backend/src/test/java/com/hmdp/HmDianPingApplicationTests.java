@@ -77,4 +77,24 @@ class HmDianPingApplicationTests {
             stringRedisTemplate.opsForGeo().add(geoKey, geoLocations);
         });
     }
+
+    /**
+     * 测试HyperLogLog
+     */
+    @Test
+    void testHyperLogLog(){
+        String [] values = new String[1000];
+        int j = 0;
+        for (int i = 0; i < 1000000; i++) {
+            j = i % 1000;
+            values[j] = "user_" + i;
+            if(j == 999){
+                // 每1000个元素执行一次
+                stringRedisTemplate.opsForHyperLogLog().add("hmdp:hll_test", values);
+            }
+        }
+        // 获取HyperLogLog的 cardinality
+        Long size = stringRedisTemplate.opsForHyperLogLog().size("hmdp:hll_test");
+        System.out.println("size = " + size);
+    }
 }
