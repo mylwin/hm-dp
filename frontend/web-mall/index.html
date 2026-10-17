@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#c2411c" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preload" as="image" href="/images/dining-hero.webp" fetchpriority="high" />
+    <meta name="description" content="黑马点评，发现身边值得去的好店。浏览商家、阅读探店笔记，发现本地生活。" />
+    <title>黑马点评 · 发现生活的好去处</title>
+    <script>
+      try {
+        const theme = localStorage.getItem('hmdp-theme');
+        document.documentElement.dataset.theme = theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      } catch (_) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
