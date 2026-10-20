@@ -1,7 +1,5 @@
 package com.hmdp.service.impl;
 
-import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -12,21 +10,23 @@ import com.hmdp.entity.User;
 import com.hmdp.mapper.UserMapper;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RegexUtils;
+import com.hmdp.utils.JwtUtils;
+import com.hmdp.utils.LoginTokenStore;
+import com.hmdp.utils.LoginCodeVerifier;
 import com.hmdp.utils.UserHolder;
-import jakarta.servlet.http.HttpSession;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtException;
 import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.RedisConstants.*;
 import static com.hmdp.utils.SystemConstants.*;
@@ -44,14 +44,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
 
+    @Autowired
+    private JwtUtils jwtUtils;
+
+    @Autowired
+    private LoginTokenStore loginTokenStore;
+
+    @Autowired
+    private LoginCodeVerifier loginCodeVerifier;
+
     /**
      * 发送手机验证码
      *
      * @param phone   手机号
-     * @param session 会话
      */
     @Override
-    public Result sendCode(String phone, HttpSession session) {
+    public Result sendCode(String phone) {
         // 1.验证手机号是否合法
         if (RegexUtils.isPhoneInvalid(phone)) {
             // 2.如果不合法，返回错误
@@ -62,7 +70,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         String code = RandomUtil.randomNumbers(6);
 
         // 4.保存验证码到 redis 中
-        stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone, code, LOGIN_CODE_TTL, TimeUnit.MINUTES);
+        String error = loginCodeVerifier.store(phone, code);
+        if (error != null) return Result.fail(error);
 
         // 5.发送验证码
         log.debug("发送验证码成功，验证码：{}", code);
@@ -75,11 +84,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      * 登录功能
      *
      * @param loginForm 登录参数，包含手机号、验证码；或者手机号、密码
-     * @param session   会话
      * @return 通用结果
      */
     @Override
-    public Result login(LoginFormDTO loginForm, HttpSession session) {
+    public Result login(LoginFormDTO loginForm) {
         // 1.验证手机号是否合法
         String phone = loginForm.getPhone();
         if (RegexUtils.isPhoneInvalid(phone)) {
@@ -87,13 +95,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("手机号格式错误");
         }
 
-//        // 3.验证验证码是否合法
-//        String code = loginForm.getCode();
-//        String cacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
-//        if (!cacheCode.equals(code)) {
-//            // 4.如果不合法，返回错误
-//            return Result.fail("验证码错误");
-//        }
+        // 3.验证验证码是否合法
+        String error = loginCodeVerifier.verify(phone, loginForm.getCode());
+        if (error != null) return Result.fail(error);
 
         // 5.从数据库中查询用户是否存
         User user = query().eq("phone", phone).one();
@@ -104,21 +108,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             log.debug("新用户创建成功，用户信息：{}", user);
         }
 
-        // 7.保存用户到 redis 中（redis 中只保存用户不敏感的信息）
-        // 7.1为用户生成token
-        String token = UUID.fastUUID().toString(true);
-
-        // 7.2将用户对象转换为HashMap
-        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-        Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new HashMap<>(),
-                CopyOptions.create()
-                        .setIgnoreNullValue(true)
-                        .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
-
-        // 7.3保存
-        stringRedisTemplate.opsForHash().putAll(LOGIN_USER_KEY + token, userMap);
-        // 7.4设置有效期
-        stringRedisTemplate.expire(LOGIN_USER_KEY + token, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        // 7.签发 JWT，再登记可撤销会话；白名单写入成功后才向客户端返回令牌。
+        String jti = UUID.fastUUID().toString(true);
+        String token = jwtUtils.generateToken(user.getId(), jti, user.getNickName(), user.getIcon());
+        Claims claims = jwtUtils.parseToken(token);
+        loginTokenStore.register(claims);
 
         // 8.返回token
         return Result.ok(token);
@@ -132,10 +126,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public Result logout(String token) {
-        // 1.删除 Redis 中的用户数据
-        stringRedisTemplate.delete(LOGIN_USER_KEY + token);
-        // 2.清除 ThreadLocal
         UserHolder.removeUser();
+        String jwt = JwtUtils.stripBearer(token);
+        if (StringUtils.hasText(jwt)) {
+            try {
+                loginTokenStore.revoke(jwtUtils.parseToken(jwt));
+            } catch (JwtException ignored) {
+                // 缺失或无效令牌视作已退出；Redis 故障仍向上抛出，避免伪报撤销成功。
+            }
+        }
         return Result.ok();
     }
 

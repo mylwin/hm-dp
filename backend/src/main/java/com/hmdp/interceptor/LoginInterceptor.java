@@ -1,5 +1,6 @@
-package com.hmdp.utils;
+package com.hmdp.interceptor;
 
+import com.hmdp.utils.UserHolder;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.servlet.HandlerInterceptor;

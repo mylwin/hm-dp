@@ -1,10 +1,9 @@
 package com.hmdp.config;
 
-import com.hmdp.utils.LoginInterceptor;
-import com.hmdp.utils.RefreshInterceptor;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.hmdp.interceptor.LoginInterceptor;
+import com.hmdp.interceptor.JwtAuthInterceptor;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -15,25 +14,27 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * @since 2026-05-23
  */
 @Configuration
+@RequiredArgsConstructor
 public class SpringMvcConfig implements WebMvcConfigurer {
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
+    private final JwtAuthInterceptor jwtAuthInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        // redis token刷新拦截器
-        registry.addInterceptor(new RefreshInterceptor(stringRedisTemplate))
-                        .addPathPatterns("/**").order(0);
+        // 登出由服务自行解析令牌，确保无令牌和无效令牌也能幂等退出。
+        registry.addInterceptor(jwtAuthInterceptor)
+                .addPathPatterns("/**")
+                .excludePathPatterns("/user/logout").order(0);
 
         // 登录拦截器
         registry.addInterceptor(new LoginInterceptor())
                 .excludePathPatterns(
                         "/user/login",
                         "/user/code",
+                        "/user/logout",
                         "/shop/**",
-                        "/voucher/**",
+                        "/voucher/list/**",
                         "/shop-type/**",
-                        "/upload/**",
-                        "/blog/hot").order(1);
+                        "/blog/hot",
+                        "/blog/*/likes").order(1);
     }
 }

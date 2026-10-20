@@ -2,6 +2,9 @@ package com.hmdp.config;
 
 
 import com.hmdp.dto.Result;
+import io.jsonwebtoken.JwtException;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -16,6 +19,12 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 @Slf4j
 @RestControllerAdvice
 public class WebExceptionAdvice {
+
+    @ExceptionHandler(JwtException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Result handleJwtException(JwtException e) {
+        return Result.fail("请先登录");
+    }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public Result handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {

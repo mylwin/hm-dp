@@ -1,8 +1,9 @@
-package com.hmdp.utils;
+package com.hmdp.interceptor;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.hmdp.dto.UserDTO;
+import com.hmdp.utils.UserHolder;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -15,7 +16,8 @@ import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_TTL;
 
 /**
- * redis token刷新拦截器
+ * 旧 UUID Token 的 Redis 会话刷新拦截器，保留供参考。
+ * JWT 迁移后不再注册，由 JwtAuthInterceptor 处理当前请求。
  *
  * @author mylwin
  * @since 2025-05-23
@@ -50,36 +52,23 @@ public class RefreshInterceptor implements HandlerInterceptor {
         Map<Object, Object> user = stringRedisTemplate.opsForHash().entries(LOGIN_USER_KEY + token);
 
         // 3.如果用户不存在，放行，后续由登录拦截器处理
-        if (user.isEmpty()){
+        if (user.isEmpty()) {
             return true;
         }
 
         // 4.用户存在，保存到 ThreadLocal 中
-        // 4.1将用户由Map转换为UserDTO
         UserDTO userDTO = BeanUtil.fillBeanWithMap(user, new UserDTO(), false);
-
-        // 4.2保存用户信息到TheadLocal中
         UserHolder.saveUser(userDTO);
 
         // 5.刷新token时间
         stringRedisTemplate.expire(LOGIN_USER_KEY + token, LOGIN_USER_TTL, TimeUnit.SECONDS);
-
-        // 5.放行
         return true;
     }
 
-    /**
-     * 在请求处理之后进行拦截
-     *
-     * @param request  请求对象
-     * @param response 响应对象
-     * @param handler  处理器
-     * @param ex       异常
-     * @throws Exception 异常
-     */
+    /** 请求结束后移除线程身份。 */
     @Override
-    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
-        // 1.移除用户
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
+                                Object handler, Exception ex) throws Exception {
         UserHolder.removeUser();
     }
 }

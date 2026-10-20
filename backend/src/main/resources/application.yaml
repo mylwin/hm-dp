@@ -52,7 +52,13 @@ logging:
 
 aliyun:
   oss:
-    endpoint: oss-cn-hangzhou.aliyuncs.com
-    access-key-id: ${dev.access-key-id}
-    access-key-secret: ${dev.access-key-secret}
-    bucket-name: ${dev.bucket-name}
+    endpoint: oss-cn-hangzhou.aliyuncs.com  # 阿里云OSS地址
+    access-key-id: ${dev.access-key-id}  # 访问密钥ID
+    access-key-secret: ${dev.access-key-secret}  # 访问密钥密钥
+    bucket-name: ${dev.bucket-name}  # 桶名
+
+jwt:
+  secret: ${HMDP_JWT_SECRET:${dev.secret:}}  # 优先环境变量，可回退到本地 dev.secret
+  issuer: hm-dp  # 签发者
+  access-ttl: 12h  # 访问令牌有效期
+  clock-skew-seconds: 60  # 令牌有效期容差
