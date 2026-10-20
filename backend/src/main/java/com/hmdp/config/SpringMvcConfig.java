@@ -23,7 +23,7 @@ public class SpringMvcConfig implements WebMvcConfigurer {
         // 登出由服务自行解析令牌，确保无令牌和无效令牌也能幂等退出。
         registry.addInterceptor(jwtAuthInterceptor)
                 .addPathPatterns("/**")
-                .excludePathPatterns("/user/logout").order(0);
+                .excludePathPatterns("/user/logout", "/user/refresh", "/user/login", "/user/code").order(0);
 
         // 登录拦截器
         registry.addInterceptor(new LoginInterceptor())
@@ -31,6 +31,7 @@ public class SpringMvcConfig implements WebMvcConfigurer {
                         "/user/login",
                         "/user/code",
                         "/user/logout",
+                        "/user/refresh",
                         "/shop/**",
                         "/voucher/list/**",
                         "/shop-type/**",

@@ -38,9 +38,13 @@ npm run dev
 如需修改目标，复制 `.env.example` 为 `.env.local`，调整 `API_PROXY_TARGET` 后重启。
 浏览器请求保持同源；无需更改后端接口或跨域设置。
 
-保持现有 `sessionStorage.token` 和原始 `authorization` 请求头，不添加 Bearer。
-令牌仍由后端管理有效期。所有请求处理 HTTP 错误与业务 `success: false`；
-401 会清理令牌并打开登录弹窗。长整数 ID 使用 lossless-json 保留精度。
+访问令牌仍放在 `sessionStorage.token`，通过原始 `authorization` 请求头发送。
+后端用七天有效的 HttpOnly Cookie 保存刷新凭证，JavaScript 无法读取。
+关闭页面后自动恢复会话，访问 JWT 临近两小时有效期时续签；401 后最多刷新并重试一次。
+七天从登录起算，刷新不延长。多标签页通过 Web Locks 串行轮换 Cookie，并同步退出状态。
+localStorage 只存 `hmdp-session` 恢复提示，不保存令牌。
+所有请求处理 HTTP 错误与业务 `success: false`；刷新失效后清理令牌并打开登录框，
+网络故障保留恢复机会。长整数 ID 使用 lossless-json 保留精度。
 
 | 功能 | 后端接口 |
 | --- | --- |
@@ -52,6 +56,7 @@ npm run dev
 | 热门探店 | `GET /blog/hot?current=1` |
 | 手机验证码 | `POST /user/code?phone=` |
 | 登录 | `POST /user/login`，JSON `{ phone, code }` |
+| 自动续签 / 恢复 | `POST /user/refresh`，携带 Cookie 与 `X-Requested-With` |
 | 当前用户 / 退出 | `GET /user/me` / `POST /user/logout` |
 | 优惠券秒杀 | `POST /voucher-order/seckill/{id}` |
 | 笔记详情 / 点赞用户 | `GET /blog/{id}` / `GET /blog/likes/{id}` |

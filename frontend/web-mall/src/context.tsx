@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { DataMode, User } from './types';
-import { auth, createCatalog } from './lib/api';
+import { auth, createCatalog, hasLoginSession } from './lib/api';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { createCommunity } from './lib/community';
 
@@ -13,7 +13,8 @@ function useAppState() {
     return sessionStorage.getItem('hmdp-mode') === 'preview' ? 'preview' : 'live';
   });
   const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(() => !!sessionStorage.getItem('token'));
+  const [authLoading, setAuthLoading] = useState(hasLoginSession);
+  const [sessionRevision, setSessionRevision] = useState(0);
   const [loginOpen, setLoginOpen] = useState(false);
   const [theme, updateTheme] = useState(() => document.documentElement.dataset.theme || 'light');
   const setMode = useCallback((value: DataMode) => {
@@ -25,16 +26,24 @@ function useAppState() {
   useEffect(() => { sessionStorage.setItem('hmdp-mode', mode); }, [mode]);
   useEffect(() => {
     let active = true;
-    if (mode === 'live' && sessionStorage.getItem('token')) {
+    if (mode === 'live' && hasLoginSession()) {
       setAuthLoading(true);
       auth.me().then((user) => { if (active) setUser(user); }).catch(() => { if (active) setUser(null); }).finally(() => { if (active) setAuthLoading(false); });
     } else { setUser(null); setAuthLoading(false); }
     return () => { active = false; };
-  }, [mode]);
+  }, [mode, sessionRevision]);
   useEffect(() => {
     const handler = () => { setUser(null); setLoginOpen(true); };
+    const signedOut = () => { setUser(null); setAuthLoading(false); setLoginOpen(false); };
+    const changed = () => { setUser(null); setSessionRevision((value) => value + 1); };
     window.addEventListener('hmdp:unauthorized', handler);
-    return () => window.removeEventListener('hmdp:unauthorized', handler);
+    window.addEventListener('hmdp:signed-out', signedOut);
+    window.addEventListener('hmdp:session-changed', changed);
+    return () => {
+      window.removeEventListener('hmdp:unauthorized', handler);
+      window.removeEventListener('hmdp:signed-out', signedOut);
+      window.removeEventListener('hmdp:session-changed', changed);
+    };
   }, []);
   const toggleTheme = () => {
     const value = theme === 'light' ? 'dark' : 'light';

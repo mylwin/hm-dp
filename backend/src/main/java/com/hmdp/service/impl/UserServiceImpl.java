@@ -1,6 +1,6 @@
 package com.hmdp.service.impl;
 
-import cn.hutool.core.lang.UUID;
+import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
@@ -14,7 +14,6 @@ import com.hmdp.utils.JwtUtils;
 import com.hmdp.utils.LoginTokenStore;
 import com.hmdp.utils.LoginCodeVerifier;
 import com.hmdp.utils.UserHolder;
-import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import lombok.extern.slf4j.Slf4j;
 
@@ -108,14 +107,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             log.debug("新用户创建成功，用户信息：{}", user);
         }
 
-        // 7.签发 JWT，再登记可撤销会话；白名单写入成功后才向客户端返回令牌。
-        String jti = UUID.fastUUID().toString(true);
-        String token = jwtUtils.generateToken(user.getId(), jti, user.getNickName(), user.getIcon());
-        Claims claims = jwtUtils.parseToken(token);
-        loginTokenStore.register(claims);
+        // 7.创建七天会话并签发访问 JWT；刷新凭证由控制器写入 HttpOnly Cookie。
+        UserDTO profile = BeanUtil.copyProperties(user, UserDTO.class);
 
         // 8.返回token
-        return Result.ok(token);
+        return Result.ok(loginTokenStore.create(profile));
     }
 
     /**
@@ -125,7 +121,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      * @return 通用结果
      */
     @Override
-    public Result logout(String token) {
+    public Result logout(String token, String refreshToken) {
         UserHolder.removeUser();
         String jwt = JwtUtils.stripBearer(token);
         if (StringUtils.hasText(jwt)) {
@@ -135,7 +131,25 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                 // 缺失或无效令牌视作已退出；Redis 故障仍向上抛出，避免伪报撤销成功。
             }
         }
+        if (StringUtils.hasText(refreshToken)) {
+            try {
+                loginTokenStore.revokeByRefresh(refreshToken);
+            } catch (JwtException ignored) {
+                // 无效 Cookie 视作已退出，基础设施异常仍向上传播。
+            }
+        }
         return Result.ok();
+    }
+
+    /**
+     * 刷新令牌
+     *
+     * @param refreshToken 刷新令牌
+     * @return 访问令牌
+     */
+    @Override
+    public Result refresh(String refreshToken) {
+        return Result.ok(loginTokenStore.refresh(refreshToken));
     }
 
     /**

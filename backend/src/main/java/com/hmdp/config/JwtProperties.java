@@ -26,7 +26,15 @@ public class JwtProperties {
     /**
      * JWT的过期时间
      */
-    private Duration accessTtl = Duration.ofHours(12);
+    private Duration accessTtl = Duration.ofHours(2);
+    /**
+     * 本次登录的绝对有效期，刷新不延长这七天。
+     */
+    private Duration refreshTtl = Duration.ofDays(7);
+    /**
+     * 本地 HTTP 开发用 false，HTTPS 部署应设为 true。
+     */
+    private boolean refreshCookieSecure;
     /**
      * JWT的时间偏差
      */

@@ -82,7 +82,7 @@ function ProfileContent({ ownerId, mine }: { ownerId: Id; mine: boolean }) {
   const logout = async () => {
     if (mode === 'preview' || logoutBusy) return;
     setLogoutBusy(true); setLogoutError('');
-    try { await auth.logout(); sessionStorage.removeItem('token'); setUser(null); navigate('/'); }
+    try { await auth.logout(); setUser(null); navigate('/'); }
     catch (error) { setLogoutError(errorMessage(error)); }
     finally { setLogoutBusy(false); }
   };

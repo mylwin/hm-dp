@@ -13,15 +13,29 @@ openssl rand -base64 48
 
 密钥以 UTF-8 文本读取，至少 32 字节，不做 Base64 解码；不要提交到 Git。
 本地也可使用已忽略的 `application-dev.yaml` 中的 `dev.secret`，环境变量优先。
-密钥缺失或过短时启动失败；更换密钥会使已有 JWT 全部失效，需要重新登录。
+密钥缺失或过短时启动失败；更换密钥会使已有访问 JWT 失效，现有刷新会话仍可续签。
+如需强制所有用户重新登录，还需撤销对应的 Redis 会话。
 根目录 Compose `.env` 不会自动传给本地运行的 Java 程序。
 
-登录返回值仍是 token 字符串，前端存储与请求方式保持不变；后端同时接受裸串和
-`Bearer <token>`。JWT 固定 12 小时过期，Redis 会话 TTL 对齐 `exp`，不滑动续期。
-每次有效请求本地验签后读取一次 Redis 白名单；退出只删除当前 `jti` 的会话。
+登录返回值仍是访问 token 字符串；后端同时接受裸串和 `Bearer <token>`。
+访问 JWT 默认有效期为 2 小时；刷新凭证通过 `hmdp_refresh` HttpOnly、SameSite=Lax
+持久 Cookie 保存，七天有效期从登录时计算，刷新不会延长这七天。
+Redis 使用 `hmdp:login:session:{sid}` Hash 保存用户 ID、资料快照、刷新凭证的
+SHA-256 摘要和绝对到期时间，不保存刷新凭证明文。
+鉴权本地验签后执行一次 HGET 核对用户 ID。每次签发使用新 jti、相同 sid；
+退出删除当前 sid 会话，使该端全部访问令牌和刷新凭证失效，其他端不受影响。
+
+React 前端在访问令牌临近过期时调用 `POST /user/refresh`，收到 401 时最多刷新并重试一次；
+关闭页面后用持久 Cookie 恢复登录，无需把 token 写进 localStorage。
+localStorage 只保存恢复提示，多标签页通过 Web Locks 串行轮换共享 Cookie，退出时同步清理。
+刷新接口原子轮换凭证，拒绝旧凭证重放；原有 Redis TTL 不延长。
+刷新和 Cookie 登出要求 `X-Requested-With: XMLHttpRequest`，避免跨站表单使用 Cookie。
+HTTPS 部署设置 `JWT_REFRESH_COOKIE_SECURE=true`；本地 HTTP 开发保持默认 false。
+前后端通过同源 `/api` 代理连接，访问时不要混用 localhost 和 127.0.0.1。
+旧 Vue 前端保留登录返回字符串的兼容性，自动恢复与续期仅在 React 前端接入。
 昵称、头像是签发时的资料快照，后续若增加资料编辑，需要补充资料刷新或会话失效机制。
 
-旧 UUID 会话不再接受，前端收到 401 后需重新登录。
+旧 UUID 会话及不含 sid 的旧 JWT 不再接受，本次升级后需重新登录一次。
 旧的 `hmdp:login:token:*` 键可等待自然过期，无需清空 Redis。
 验证码仍仅输出到开发日志，尚未对接短信平台；有效期两分钟，60 秒内不能重复发送，
 验证成功即原子消费，连续失败五次锁定十分钟。

@@ -60,5 +60,7 @@ aliyun:
 jwt:
   secret: ${HMDP_JWT_SECRET:${dev.secret:}}  # 优先环境变量，可回退到本地 dev.secret
   issuer: hm-dp  # 签发者
-  access-ttl: 12h  # 访问令牌有效期
+  access-ttl: 2h  # 短期访问令牌，前端自动续签
+  refresh-ttl: 7d  # 本次登录的绝对有效期，刷新不延长
+  refresh-cookie-secure: ${JWT_REFRESH_COOKIE_SECURE:false}  # HTTPS 部署设为 true
   clock-skew-seconds: 60  # 令牌有效期容差

@@ -54,6 +54,10 @@ public class JwtUtils {
         if (ttl == null || ttl.compareTo(Duration.ofSeconds(1)) < 0) {
             throw new IllegalStateException("Jwt access-ttl 必须至少为 1 秒");
         }
+        if (jwtProperties.getRefreshTtl() == null
+                || jwtProperties.getRefreshTtl().compareTo(ttl) <= 0) {
+            throw new IllegalStateException("Jwt refresh-ttl 必须大于 access-ttl");
+        }
         if (jwtProperties.getClockSkewSeconds() < 0) {
             throw new IllegalStateException("Jwt clock-skew-seconds 不能为负数");
         }
@@ -79,20 +83,45 @@ public class JwtUtils {
         return generateToken(userId, jti, null, null);
     }
 
-    /** 附带非敏感资料快照，保持 /user/me 的昵称与头像返回契约。 */
+    /**
+     * 附带非敏感资料快照，保持 /user/me 的昵称与头像返回契约。
+     */
     public String generateToken(Long userId, String jti, String nickName, String icon) {
+        return generateToken(userId, jti, nickName, icon, jti,
+                Instant.now().plus(jwtProperties.getAccessTtl()));
+    }
+
+    /**
+     * sid 标识七天会话，jti 标识每次签发的新 JWT。
+     * 会话 ID 与有效期，用于撤销会话。有效期必须晚于当前时间，否则会话将无法使用。
+     * 会话 ID 可以是随机字符串，也可以是手机号加随机数的哈希值，防止用户枚举。
+     *
+     * @param userId    用户 ID
+     * @param jti       会话 ID，必须非空
+     * @param nickName  昵称
+     * @param icon      头像
+     * @param sessionId 会话 ID，必须非空
+     * @param expiresAt 有效期，必须晚于当前时间
+     * @return JWT 令牌
+     */
+    public String generateToken(Long userId, String jti, String nickName, String icon,
+                                String sessionId, Instant expiresAt) {
         if (userId == null || userId <= 0 || !StringUtils.hasText(jti)) {
             throw new IllegalArgumentException("userId 必须为正数，jti 不能为空");
         }
         Instant now = Instant.now();
+        if (!StringUtils.hasText(sessionId) || !expiresAt.isAfter(now)) {
+            throw new IllegalArgumentException("会话 ID 不能为空，有效期必须晚于当前时间");
+        }
         return Jwts.builder()
                 .issuer(jwtProperties.getIssuer())
                 .subject(String.valueOf(userId))
                 .id(jti)
+                .claim("sid", sessionId)
                 .claim("nickName", nickName)
                 .claim("icon", icon)
                 .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(jwtProperties.getAccessTtl())))
+                .expiration(Date.from(expiresAt))
                 .signWith(key, Jwts.SIG.HS256)
                 .compact();
     }
@@ -112,6 +141,7 @@ public class JwtUtils {
         Claims claims = parser.parseSignedClaims(token).getPayload();
         getUserId(claims);
         getJti(claims);
+        getSessionId(claims);
         if (claims.getExpiration() == null) {
             throw new MalformedJwtException("JWT 缺少 exp");
         }
@@ -143,8 +173,16 @@ public class JwtUtils {
         return claims.getId();
     }
 
+    public String getSessionId(Claims claims) {
+        String sessionId = claims.get("sid", String.class);
+        if (!StringUtils.hasText(sessionId)) {
+            throw new MalformedJwtException("JWT 缺少 sid");
+        }
+        return sessionId;
+    }
+
     /**
-     * Redis 白名单 TTL 对齐 exp，不能借此延长 JWT 的有效期。
+     * 访问令牌的剩余有效期，不代表七天会话的剩余有效期。
      */
     public Duration getRemainingTtl(Claims claims) {
         if (claims.getExpiration() == null) {
@@ -154,12 +192,15 @@ public class JwtUtils {
         return remaining.isNegative() ? Duration.ZERO : remaining;
     }
 
-    /** 同时兼容现有前端裸串和标准 Bearer 请求头。 */
+    /**
+     * 同时兼容现有前端裸串和标准 Bearer 请求头。
+     */
     public static String stripBearer(String header) {
         if (!StringUtils.hasText(header)) {
             return "";
         }
         String token = header.trim();
+        // Bearer 前缀可选，忽略大小写。
         return token.regionMatches(true, 0, "Bearer ", 0, 7)
                 ? token.substring(7).trim() : token;
     }
