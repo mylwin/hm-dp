@@ -3,7 +3,7 @@ package com.hmdp.interceptor;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.hmdp.dto.UserDTO;
-import com.hmdp.utils.UserHolder;
+import com.hmdp.security.UserContext;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -12,8 +12,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
-import static com.hmdp.utils.RedisConstants.LOGIN_USER_TTL;
+import static com.hmdp.constants.AuthConstants.*;
 
 /**
  * 旧 UUID Token 的 Redis 会话刷新拦截器，保留供参考。
@@ -58,7 +57,7 @@ public class RefreshInterceptor implements HandlerInterceptor {
 
         // 4.用户存在，保存到 ThreadLocal 中
         UserDTO userDTO = BeanUtil.fillBeanWithMap(user, new UserDTO(), false);
-        UserHolder.saveUser(userDTO);
+        UserContext.saveUser(userDTO);
 
         // 5.刷新token时间
         stringRedisTemplate.expire(LOGIN_USER_KEY + token, LOGIN_USER_TTL, TimeUnit.SECONDS);
@@ -69,6 +68,6 @@ public class RefreshInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                 Object handler, Exception ex) throws Exception {
-        UserHolder.removeUser();
+        UserContext.removeUser();
     }
 }

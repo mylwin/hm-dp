@@ -1,0 +1,42 @@
+# Replace the existing server block only when ready to deploy this frontend.
+# Update the root path. Existing upstream ports and API paths are preserved.
+upstream hmdp_backend {
+    server 127.0.0.1:8081;
+    server 127.0.0.1:8082;
+    keepalive 32;
+}
+
+server {
+    listen 8080;
+    server_name localhost;
+    root /absolute/path/to/frontend/web/dist;
+    index index.html;
+    client_max_body_size 12m;
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    location /api/ {
+        proxy_pass http://hmdp_backend/;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Authorization $http_authorization;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location ~* \.(webp|png|jpe?g|woff2?)$ {
+        try_files $uri =404;
+        expires 7d;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

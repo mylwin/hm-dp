@@ -1,16 +1,16 @@
 package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
+import com.hmdp.infrastructure.lock.SimpleRedisLock;
+import com.hmdp.infrastructure.redis.RedisIdGenerator;
 import com.hmdp.mapper.VoucherOrderMapper;
+import com.hmdp.security.UserContext;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.hmdp.utils.RedisIdWorker;
-import com.hmdp.utils.SimpleRedisLock;
-import com.hmdp.utils.UserHolder;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -32,8 +32,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
-import static com.hmdp.utils.RedisConstants.LOCK_KEY;
-import static com.hmdp.utils.RedisConstants.ORDER_MQ;
+import static com.hmdp.constants.LockConstants.*;
+import static com.hmdp.constants.SeckillConstants.*;
 
 /**
  * 优惠券订单服务实现类
@@ -51,7 +51,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
-    private RedisIdWorker redisIdWorker;
+    private RedisIdGenerator redisIdGenerator;
 
     @Autowired
     private RedissonClient redissonClient;
@@ -78,7 +78,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     static {
         SECKILL_SCRIPT = new DefaultRedisScript<>();
-        SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
+        SECKILL_SCRIPT.setLocation(new ClassPathResource("lua/seckill/seckill.lua"));
         SECKILL_SCRIPT.setResultType(Long.class);
     }
 
@@ -99,8 +99,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Override
     public Result seckillVoucher(Long voucherId) {
         // 1.获取用户id 和 订单id
-        Long userId = UserHolder.getUser().getId();
-        long orderId = redisIdWorker.getNextId("voucher_order");
+        Long userId = UserContext.getUser().getId();
+        long orderId = redisIdGenerator.getNextId("voucher_order");
         // 2.执行Lua脚本
         Long result = stringRedisTemplate.execute(
                 SECKILL_SCRIPT,
@@ -124,7 +124,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     /*@Override
     public Result seckillVoucher(Long voucherId) {
         // 1.获取用户id
-        Long userId = UserHolder.getUser().getId();
+        Long userId = UserContext.getUser().getId();
 
         // 2.执行Lua脚本
         Long result = stringRedisTemplate.execute(
@@ -140,7 +140,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail(r == 1 ? "库存不足！" : "请勿重复下单！");
         }
         // 2.3 等于0，有秒杀资格
-        long orderId = redisIdWorker.getNextId("voucher_order");
+        long orderId = redisIdGenerator.getNextId("voucher_order");
         // 2.4 构建订单对象
         VoucherOrder voucherOrder = new VoucherOrder();
         voucherOrder.setId(orderId);
@@ -180,7 +180,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
 
         // 5.添加redis分布式锁，确保一人一单
-        Long userID = UserHolder.getUser().getId();
+        Long userID = UserContext.getUser().getId();
         // 5.1尝试获取锁
         // SimpleRedisLock simpleRedisLock = new SimpleRedisLock("seckill_voucher:" + voucherId + ":" + userID, stringRedisTemplate);
         RLock lock = redissonClient.getLock(LOCK_KEY + "seckill_voucher:" + voucherId + ":" + userID);

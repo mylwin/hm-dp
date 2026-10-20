@@ -2,7 +2,7 @@ package com.hmdp.controller;
 
 import cn.hutool.core.util.StrUtil;
 import com.hmdp.dto.Result;
-import com.hmdp.service.OssService;
+import com.hmdp.infrastructure.storage.ObjectStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -23,7 +23,7 @@ public class UploadController {
     private static final long MAX_BLOG_IMAGE_SIZE = 100L * 1024 * 1024;
 
     @Autowired
-    private OssService ossService;
+    private ObjectStorageService objectStorageService;
 
     /**
      * 上传图片
@@ -43,7 +43,7 @@ public class UploadController {
         try {
             String originalFilename = file.getOriginalFilename();
             String objectKey = createObjectKey(originalFilename);
-            String url = ossService.upload(file, objectKey);
+            String url = objectStorageService.upload(file, objectKey);
             return Result.ok(url);
         } catch (Exception e) {
             throw new RuntimeException("文件上传失败", e);
@@ -78,7 +78,7 @@ public class UploadController {
     @GetMapping("/blog/delete")
     public Result deleteBlogImg(@RequestParam("name") String ossUrl) {
         try {
-            ossService.delete(ossUrl);
+            objectStorageService.delete(ossUrl);
             return Result.ok();
         } catch (Exception e) {
             return Result.fail("文件删除失败");

@@ -8,15 +8,14 @@ import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.UserMapper;
+import com.hmdp.security.JwtTokenService;
+import com.hmdp.security.LoginCodeService;
+import com.hmdp.security.LoginSessionStore;
+import com.hmdp.security.UserContext;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RegexUtils;
-import com.hmdp.utils.JwtUtils;
-import com.hmdp.utils.LoginTokenStore;
-import com.hmdp.utils.LoginCodeVerifier;
-import com.hmdp.utils.UserHolder;
 import io.jsonwebtoken.JwtException;
 import lombok.extern.slf4j.Slf4j;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -27,8 +26,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
-import static com.hmdp.utils.RedisConstants.*;
-import static com.hmdp.utils.SystemConstants.*;
+import static com.hmdp.constants.UserConstants.*;
 
 /**
  * 用户服务实现类
@@ -44,13 +42,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
-    private JwtUtils jwtUtils;
+    private JwtTokenService jwtTokenService;
 
     @Autowired
-    private LoginTokenStore loginTokenStore;
+    private LoginSessionStore loginSessionStore;
 
     @Autowired
-    private LoginCodeVerifier loginCodeVerifier;
+    private LoginCodeService loginCodeService;
 
     /**
      * 发送手机验证码
@@ -69,7 +67,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         String code = RandomUtil.randomNumbers(6);
 
         // 4.保存验证码到 redis 中
-        String error = loginCodeVerifier.store(phone, code);
+        String error = loginCodeService.store(phone, code);
         if (error != null) return Result.fail(error);
 
         // 5.发送验证码
@@ -95,7 +93,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
 
         // 3.验证验证码是否合法
-        String error = loginCodeVerifier.verify(phone, loginForm.getCode());
+        String error = loginCodeService.verify(phone, loginForm.getCode());
         if (error != null) return Result.fail(error);
 
         // 5.从数据库中查询用户是否存
@@ -111,7 +109,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         UserDTO profile = BeanUtil.copyProperties(user, UserDTO.class);
 
         // 8.返回token
-        return Result.ok(loginTokenStore.create(profile));
+        return Result.ok(loginSessionStore.create(profile));
     }
 
     /**
@@ -122,18 +120,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public Result logout(String token, String refreshToken) {
-        UserHolder.removeUser();
-        String jwt = JwtUtils.stripBearer(token);
+        UserContext.removeUser();
+        String jwt = JwtTokenService.stripBearer(token);
         if (StringUtils.hasText(jwt)) {
             try {
-                loginTokenStore.revoke(jwtUtils.parseToken(jwt));
+                loginSessionStore.revoke(jwtTokenService.parseToken(jwt));
             } catch (JwtException ignored) {
                 // 缺失或无效令牌视作已退出；Redis 故障仍向上抛出，避免伪报撤销成功。
             }
         }
         if (StringUtils.hasText(refreshToken)) {
             try {
-                loginTokenStore.revokeByRefresh(refreshToken);
+                loginSessionStore.revokeByRefresh(refreshToken);
             } catch (JwtException ignored) {
                 // 无效 Cookie 视作已退出，基础设施异常仍向上传播。
             }
@@ -149,7 +147,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public Result refresh(String refreshToken) {
-        return Result.ok(loginTokenStore.refresh(refreshToken));
+        return Result.ok(loginSessionStore.refresh(refreshToken));
     }
 
     /**
@@ -160,7 +158,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Override
     public Result sign() {
         // 1.获取当前用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if(user == null) return Result.fail("请先登录");
         Long userId = user.getId();
 
@@ -190,7 +188,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Override
     public Result getSignCount() {
         // 1.获取当前用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if(user == null) return Result.fail("请先登录");
         Long userId = user.getId();
 

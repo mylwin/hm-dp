@@ -3,9 +3,9 @@ package com.hmdp.interceptor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
-import com.hmdp.utils.JwtUtils;
-import com.hmdp.utils.LoginTokenStore;
-import com.hmdp.utils.UserHolder;
+import com.hmdp.security.JwtTokenService;
+import com.hmdp.security.LoginSessionStore;
+import com.hmdp.security.UserContext;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,27 +24,27 @@ import java.nio.charset.StandardCharsets;
 @Component
 @RequiredArgsConstructor
 public class JwtAuthInterceptor implements HandlerInterceptor {
-    private final JwtUtils jwtUtils;
-    private final LoginTokenStore loginTokenStore;
+    private final JwtTokenService jwtTokenService;
+    private final LoginSessionStore loginSessionStore;
     private final ObjectMapper objectMapper;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
             throws IOException {
-        UserHolder.removeUser();
-        String token = JwtUtils.stripBearer(request.getHeader(HttpHeaders.AUTHORIZATION));
+        UserContext.removeUser();
+        String token = JwtTokenService.stripBearer(request.getHeader(HttpHeaders.AUTHORIZATION));
         if (!StringUtils.hasText(token)) return true;
 
         try {
-            Claims claims = jwtUtils.parseToken(token);
-            if (!loginTokenStore.isActive(claims)) {
+            Claims claims = jwtTokenService.parseToken(token);
+            if (!loginSessionStore.isActive(claims)) {
                 return reject(response, "登录已失效");
             }
             UserDTO user = new UserDTO();
-            user.setId(jwtUtils.getUserId(claims));
+            user.setId(jwtTokenService.getUserId(claims));
             user.setNickName(claims.get("nickName", String.class));
             user.setIcon(claims.get("icon", String.class));
-            UserHolder.saveUser(user);
+            UserContext.saveUser(user);
             return true;
         } catch (JwtException e) {
             return reject(response, "请先登录");
@@ -54,11 +54,11 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                 Object handler, Exception ex) {
-        UserHolder.removeUser();
+        UserContext.removeUser();
     }
 
     private boolean reject(HttpServletResponse response, String message) throws IOException {
-        UserHolder.removeUser();
+        UserContext.removeUser();
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);

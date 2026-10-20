@@ -2,15 +2,15 @@ package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Follow;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.FollowMapper;
+import com.hmdp.security.UserContext;
 import com.hmdp.service.IFollowService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.service.IUserService;
-import com.hmdp.utils.UserHolder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.hmdp.utils.RedisConstants.FOLLOW_USER_KEY;
+import static com.hmdp.constants.FollowConstants.*;
 
 /**
  * 关注服务实现类
@@ -45,7 +45,7 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
     @Override
     public Result isFollow(Long followUserId) {
         // 1.获取当前登录用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if (user == null) {
             return Result.fail("请先登录");
         }
@@ -70,7 +70,7 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
     @Override
     public Result follow(Long followUserId, Boolean isFollow) {
         // 1.获取当前登录用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if (user == null) {
             return Result.fail("请先登录");
         }
@@ -113,7 +113,7 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
     @Override
     public Result queryCommonFollow(Long id) {
         // 1.获取当前登录用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if (user == null) {
             return Result.fail("请先登录");
         }

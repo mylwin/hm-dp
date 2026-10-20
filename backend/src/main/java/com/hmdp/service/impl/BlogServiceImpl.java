@@ -4,18 +4,19 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.log.Log;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.constants.PageConstants;
 import com.hmdp.dto.Result;
+import com.hmdp.dto.ScrollResult;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
 import com.hmdp.entity.Follow;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.BlogMapper;
+import com.hmdp.security.UserContext;
 import com.hmdp.service.IBlogService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.service.IFollowService;
 import com.hmdp.service.IUserService;
-import com.hmdp.utils.SystemConstants;
-import com.hmdp.utils.UserHolder;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,9 +30,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static com.hmdp.utils.RedisConstants.*;
-
-import com.hmdp.dto.ScrollResult;
+import static com.hmdp.constants.BlogConstants.*;
+import static com.hmdp.constants.LockConstants.*;
 
 /**
  * 探店笔记服务实现类
@@ -87,7 +87,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         // 根据用户查询
         Page<Blog> page = query()
                 .orderByDesc("liked")
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+                .page(new Page<>(current, PageConstants.MAX_PAGE_SIZE));
 
         // 获取当前页数据
         List<Blog> records = page.getRecords();
@@ -109,7 +109,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Override
     public Result likeBlog(Long id) {
         // 获取登录用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if (user == null) {
             return Result.fail("请先登录");
         }
@@ -201,7 +201,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     public Result queryBlogByUserId(Long id, Integer current) {
         Page<Blog> page = query()
                 .eq("user_id", id)
-                .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
+                .page(new Page<>(current, PageConstants.MAX_PAGE_SIZE));
 
         List<Blog> records = page.getRecords();
         return Result.ok(records);
@@ -217,7 +217,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Override
     public Result queryBlogOfFollow(Long max, Integer offset) {
         // 1.获取当前登录用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if (user == null) {
             return Result.fail("请先登录");
         }
@@ -286,7 +286,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Transactional(rollbackFor = Exception.class)
     public Result saveBlog(Blog blog) {
         // 1.获取登录用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if (user == null) {
             return Result.fail("请先登录");
         }
@@ -320,7 +320,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
      */
     private Boolean isMember(Long id) {
         // 获取用户
-        UserDTO user = UserHolder.getUser();
+        UserDTO user = UserContext.getUser();
         if (user == null) return false;
         // 判断用户是否在点赞列表中
         String key = BLOG_LIKED_KEY + id;

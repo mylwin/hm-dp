@@ -3,6 +3,18 @@
 通过 Docker Compose 统一管理 MySQL 和 Redis，Java 后端、JDK 和前端继续在本地运行。
 使用官方镜像，无需编写 Dockerfile。
 
+## 项目目录
+
+- `backend/`：Spring Boot 后端；常量按功能放在 `constants`，认证放在
+  `security`，缓存、锁、Redis ID 和对象存储放在 `infrastructure`。
+- `frontend/web/`：当前 React 前端，在此目录运行 `npm run dev`。
+- `frontend/legacy/`：完整保留的旧 HTML 前端和资源。
+- `frontend/nginx-1.18.0/`：保留的 Nginx 运行目录，`html/hmdp` 通过相对
+  符号链接指向旧前端；不支持符号链接的环境可将 Nginx root 指向 legacy。
+- `docker/`：本地依赖的辅助配置与脚本。
+
+包职责、文件迁移对照和保留代码说明见 [项目结构说明](STRUCTURE.md)。
+
 ## 后端 JWT 配置
 
 启动后端前，在 IDEA 的环境变量中配置 `HMDP_JWT_SECRET`，值可用以下命令生成：

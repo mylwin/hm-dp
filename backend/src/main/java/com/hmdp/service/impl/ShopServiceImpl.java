@@ -6,14 +6,14 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.constants.PageConstants;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
+import com.hmdp.infrastructure.cache.LogicalExpireCacheEntry;
+import com.hmdp.infrastructure.cache.RedisCacheClient;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.hmdp.utils.CacheClient;
-import com.hmdp.utils.RedisData;
-import com.hmdp.utils.SystemConstants;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.geo.Distance;
@@ -33,7 +33,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import static com.hmdp.utils.RedisConstants.*;
+import static com.hmdp.constants.CacheConstants.*;
+import static com.hmdp.constants.LockConstants.*;
+import static com.hmdp.constants.ShopConstants.*;
 
 /**
  * 商铺服务实现类
@@ -48,7 +50,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
-    private CacheClient cacheClient;
+    private RedisCacheClient redisCacheClient;
 
     // private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 
@@ -61,13 +63,13 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Override
     public Result queryById(Long id) {
         // 缓存空值解决缓存穿透问题
-        // Shop shop = cacheClient.queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        // Shop shop = redisCacheClient.queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         // 利用互斥锁解决缓存击穿问题
-        Shop shop = cacheClient.queryWithMutex(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        Shop shop = redisCacheClient.queryWithMutex(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         // 利用逻辑过期解决缓存击穿问题
-        // Shop shop = cacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        // Shop shop = redisCacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
         // 返回结果
         if (shop == null) {
             return Result.fail("店铺不存在！");
@@ -113,14 +115,14 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             // 1.1 根据类型分页查询
             Page<Shop> page = query()
                     .eq("type_id", typeId)
-                    .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
+                    .page(new Page<>(current, PageConstants.DEFAULT_PAGE_SIZE));
             // 1.2 返回数据
             return Result.ok(page.getRecords());
         }
 
         // 2.计算分页参数
-        int from = (current - 1) * SystemConstants.DEFAULT_PAGE_SIZE;
-        int end = current * SystemConstants.DEFAULT_PAGE_SIZE;
+        int from = (current - 1) * PageConstants.DEFAULT_PAGE_SIZE;
+        int end = current * PageConstants.DEFAULT_PAGE_SIZE;
 
         // 3.查询redis数据按照distance排序
         String key = SHOP_GEO_KEY + typeId;
@@ -189,7 +191,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         }
 
         // 3.缓存命中
-        RedisData redisData = JSONUtil.toBean(cacheShopJson, RedisData.class);
+        LogicalExpireCacheEntry redisData = JSONUtil.toBean(cacheShopJson, LogicalExpireCacheEntry.class);
         Shop shop = JSONUtil.toBean((JSONObject) redisData.getData(), Shop.class);
         LocalDateTime expireTime = redisData.getExpireTime();
         // 3.1缓存未过期，返回店铺信息
@@ -204,7 +206,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             // 4.1获取锁之后再次检测缓存是否已被其他线程重建（双重检测）
             String doubleCheckShopJson = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
             if (StrUtil.isNotBlank(doubleCheckShopJson)) {
-                RedisData doubleCheckData = JSONUtil.toBean(doubleCheckShopJson, RedisData.class);
+                LogicalExpireCacheEntry doubleCheckData = JSONUtil.toBean(doubleCheckShopJson, LogicalExpireCacheEntry.class);
                 if (doubleCheckData.getExpireTime().isAfter(LocalDateTime.now())) {
                     // 缓存已被其他线程重建且未过期，释放锁并返回
                     unlock(lockKey);
@@ -321,7 +323,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         Shop shop = getById(id);
 
         // 2.封装逻辑过期时间
-        RedisData<Shop> redisData = new RedisData<>();
+        LogicalExpireCacheEntry<Shop> redisData = new LogicalExpireCacheEntry<>();
         redisData.setData(shop);
         redisData.setExpireTime(LocalDateTime.now().plusSeconds(expireTime));
 

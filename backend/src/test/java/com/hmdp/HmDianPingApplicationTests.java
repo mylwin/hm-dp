@@ -1,8 +1,8 @@
 package com.hmdp;
 
 import com.hmdp.entity.Shop;
+import com.hmdp.infrastructure.redis.RedisIdGenerator;
 import com.hmdp.service.impl.ShopServiceImpl;
-import com.hmdp.utils.RedisIdWorker;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,7 +17,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
-import static com.hmdp.utils.RedisConstants.SHOP_GEO_KEY;
+import static com.hmdp.constants.ShopConstants.*;
 
 @SpringBootTest
 class HmDianPingApplicationTests {
@@ -28,7 +28,7 @@ class HmDianPingApplicationTests {
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
-    private RedisIdWorker redisWorker;
+    private RedisIdGenerator redisWorker;
 
     private ExecutorService es = Executors.newFixedThreadPool(300);
 
