@@ -4,6 +4,7 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.hmdp.config.CacheProperties;
 import com.hmdp.exception.CacheRebuildBusyException;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -36,6 +38,13 @@ public class RedisCacheClient {
     @Autowired
     private RedissonClient redissonClient;
 
+    // Spring单例内共用，限制不同Key同时执行数据库回源的数量。
+    private final Semaphore databaseFallbackPermits;
+
+    public RedisCacheClient(CacheProperties cacheProperties) {
+        this.databaseFallbackPermits = new Semaphore(cacheProperties.getMaxConcurrentFallbacks());
+    }
+
     private static final long MUTEX_WAIT_SECONDS = 1L;
 
     private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
@@ -55,6 +64,7 @@ public class RedisCacheClient {
 
     /**
      * 将key对应的缓存设置为空值
+     *
      * @param key 缓存的key
      */
     private void setNull(String key) {
@@ -165,7 +175,7 @@ public class RedisCacheClient {
             }
 
             // 4.缓存确实不存在，查询数据库
-            T dbData = dbFallback.apply(id);
+            T dbData = loadFromDatabase(id, dbFallback);
 
             // 5.数据库中不存在，往redis中写入空并返回错误状态（直接写原生命令，避免二次序列化）
             if (dbData == null) {
@@ -184,6 +194,23 @@ public class RedisCacheClient {
             if (locked && lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
+        }
+    }
+
+    /**
+     * 立即申请回源许可；仅限制查询数据库的阶段，不占用许可等待缓存写入。
+     * @param id         id
+     * @param dbFallback 读数据库的函数
+     * @return 查询结果
+     */
+    private <T, ID> T loadFromDatabase(ID id, Function<ID, T> dbFallback) {
+        if (!databaseFallbackPermits.tryAcquire()) {
+            throw new CacheRebuildBusyException("系统繁忙，请稍后再试");
+        }
+        try {
+            return dbFallback.apply(id);
+        } finally {
+            databaseFallbackPermits.release();
         }
     }
 

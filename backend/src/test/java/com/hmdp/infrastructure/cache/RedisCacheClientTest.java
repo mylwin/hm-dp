@@ -1,6 +1,7 @@
 package com.hmdp.infrastructure.cache;
 
 import cn.hutool.json.JSONUtil;
+import com.hmdp.config.CacheProperties;
 import com.hmdp.entity.Shop;
 import com.hmdp.exception.CacheRebuildBusyException;
 import com.hmdp.exception.GlobalExceptionHandler;
@@ -13,6 +14,10 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 import static com.hmdp.constants.CacheConstants.*;
@@ -33,7 +38,7 @@ class RedisCacheClientTest {
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
-        client = new RedisCacheClient();
+        client = new RedisCacheClient(new CacheProperties());
         redis = mock(StringRedisTemplate.class);
         values = mock(ValueOperations.class);
         redisson = mock(RedissonClient.class);
@@ -46,7 +51,11 @@ class RedisCacheClientTest {
     }
 
     private Shop query() {
-        return client.queryWithMutex(CACHE_SHOP_KEY, 1L, Shop.class,
+        return query(1L);
+    }
+
+    private Shop query(Long id) {
+        return client.queryWithMutex(CACHE_SHOP_KEY, id, Shop.class,
                 database, CACHE_SHOP_TTL, TimeUnit.MINUTES);
     }
 
@@ -151,5 +160,79 @@ class RedisCacheClientTest {
         } finally {
             Thread.interrupted();
         }
+    }
+
+    @Test
+    void differentShopsShareLimitWhileCachedRequestsStillSucceed() throws Exception {
+        CacheProperties properties = new CacheProperties();
+        properties.setMaxConcurrentFallbacks(2);
+        client = new RedisCacheClient(properties);
+        ReflectionTestUtils.setField(client, "stringRedisTemplate", redis);
+        ReflectionTestUtils.setField(client, "redissonClient", redisson);
+        // 模拟不同商铺都能拿到各自的锁，验证跨Key的本地并发限制。
+        when(redisson.getLock(anyString())).thenReturn(lock);
+        when(lock.tryLock(1, TimeUnit.SECONDS)).thenReturn(true);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
+        CountDownLatch enteredDatabase = new CountDownLatch(2);
+        CountDownLatch finishQueries = new CountDownLatch(1);
+        when(database.apply(anyLong())).thenAnswer(invocation -> {
+            enteredDatabase.countDown();
+            if (!finishQueries.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("数据库查询未收到完成信号");
+            }
+            Shop shop = new Shop();
+            shop.setId(invocation.getArgument(0));
+            return shop;
+        });
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<Shop> first = executor.submit(() -> query(1L));
+            Future<Shop> second = executor.submit(() -> query(2L));
+            assertTrue(enteredDatabase.await(5, TimeUnit.SECONDS));
+
+            assertThrows(CacheRebuildBusyException.class, () -> query(3L));
+            verify(database, never()).apply(3L);
+            verify(values, never()).set(eq(CACHE_SHOP_KEY + 3L), anyString(), anyLong(), any(TimeUnit.class));
+            // 额度已满时，正常缓存和空值缓存均不需要申请许可。
+            Shop cached = new Shop();
+            cached.setId(99L);
+            when(values.get(CACHE_SHOP_KEY + 99L)).thenReturn(JSONUtil.toJsonStr(cached));
+            when(values.get(CACHE_SHOP_KEY + 100L)).thenReturn("");
+            assertEquals(99L, query(99L).getId());
+            assertNull(query(100L));
+            verify(redisson, never()).getLock(LOCK_KEY + "cache:mutex:" + CACHE_SHOP_KEY + 99L);
+            verify(redisson, never()).getLock(LOCK_KEY + "cache:mutex:" + CACHE_SHOP_KEY + 100L);
+
+            finishQueries.countDown();
+            assertEquals(1L, first.get(5, TimeUnit.SECONDS).getId());
+            assertEquals(2L, second.get(5, TimeUnit.SECONDS).getId());
+            assertEquals(4L, query(4L).getId());
+            // 两次并发成功、一次拒绝、一次后续成功，均释放商铺锁。
+            verify(lock, times(4)).unlock();
+        } finally {
+            finishQueries.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void emptyResultAndDatabaseExceptionBothReturnPermit() throws Exception {
+        CacheProperties properties = new CacheProperties();
+        properties.setMaxConcurrentFallbacks(1);
+        client = new RedisCacheClient(properties);
+        ReflectionTestUtils.setField(client, "stringRedisTemplate", redis);
+        ReflectionTestUtils.setField(client, "redissonClient", redisson);
+        when(lock.tryLock(1, TimeUnit.SECONDS)).thenReturn(true);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
+        Shop shop = new Shop();
+        shop.setId(1L);
+        IllegalStateException failure = new IllegalStateException("database unavailable");
+        when(database.apply(1L)).thenReturn(null).thenThrow(failure).thenReturn(shop);
+
+        assertNull(query());
+        assertSame(failure, assertThrows(IllegalStateException.class, this::query));
+        assertSame(shop, query());
+        verify(lock, times(3)).unlock();
     }
 }

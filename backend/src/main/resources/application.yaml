@@ -57,6 +57,11 @@ aliyun:
     access-key-secret: ${dev.access-key-secret}  # 访问密钥密钥
     bucket-name: ${dev.bucket-name}  # 桶名
 
+hmdp:
+  cache:
+    # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。
+    max-concurrent-fallbacks: ${CACHE_MAX_CONCURRENT_FALLBACKS:10}
+
 jwt:
   secret: ${HMDP_JWT_SECRET:${dev.secret:}}  # 优先环境变量，可回退到本地 dev.secret
   issuer: hm-dp  # 签发者
