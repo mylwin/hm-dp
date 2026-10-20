@@ -42,7 +42,17 @@ public class CacheClient {
      * @param timeUnit 时间单位
      */
     public <T> void set(String key, T value, Long time, TimeUnit timeUnit) {
-        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(value), time, timeUnit);
+        long ttlSeconds = CacheTtl.withJitter(time, timeUnit, CACHE_TTL_JITTER_SECONDS);
+        stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(value), ttlSeconds, TimeUnit.SECONDS);
+    }
+
+    /**
+     * 将key对应的缓存设置为空值
+     * @param key 缓存的key
+     */
+    private void setNull(String key) {
+        long ttlSeconds = CacheTtl.withJitter(CACHE_NULL_TTL, TimeUnit.MINUTES, CACHE_NULL_TTL_JITTER_SECONDS);
+        stringRedisTemplate.opsForValue().set(key, "", ttlSeconds, TimeUnit.SECONDS);
     }
 
     /**
@@ -91,8 +101,8 @@ public class CacheClient {
         T dbData = dbFallback.apply(id);
         // 3.1如果数据库不存在，则写入空值到redis中
         if (dbData == null) {
-            // 空值保留2分钟
-            stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+            // 空值保留2分钟，并增加随机偏移
+            this.setNull(key);
             return null;
         }
         // 3.2如果数据库存在，则写入redis
@@ -156,7 +166,7 @@ public class CacheClient {
 
             // 5.数据库中不存在，往redis中写入空并返回错误状态（直接写原生命令，避免二次序列化）
             if (dbData == null) {
-                stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                this.setNull(key);
                 return null;
             }
 

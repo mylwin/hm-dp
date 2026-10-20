@@ -23,8 +23,12 @@ public class RedisConstants {
     public static final String LOGIN_CODE_SEND_KEY = "hmdp:login:code:send:";
 
     public static final Long CACHE_NULL_TTL = 2L;
+    /** 空值缓存的最大随机偏移，单位为秒。 */
+    public static final long CACHE_NULL_TTL_JITTER_SECONDS = 30L;
 
     public static final Long CACHE_SHOP_TTL = 30L;
+    /** 业务数据缓存的最大随机偏移，单位为秒。 */
+    public static final long CACHE_TTL_JITTER_SECONDS = 300L;
     public static final String CACHE_SHOP_KEY = "hmdp:cache:shop:";
 
     public static final String CACHE_SHOP_TYPE_KEY = "hmdp:cache:shop:type:";

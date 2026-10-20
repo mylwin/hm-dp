@@ -5,6 +5,7 @@ import com.hmdp.dto.Result;
 import com.hmdp.entity.ShopType;
 import com.hmdp.mapper.ShopTypeMapper;
 import com.hmdp.service.IShopTypeService;
+import com.hmdp.utils.CacheTtl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -60,7 +61,8 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
         // 4.数据库中不存在，往redis中写入空值标记并返回错误状态
         if (shopTypeList.isEmpty()) {
             stringRedisTemplate.opsForZSet().add(CACHE_SHOP_TYPE_KEY, "", 0);
-            stringRedisTemplate.expire(CACHE_SHOP_TYPE_KEY, CACHE_NULL_TTL, TimeUnit.MINUTES);
+            long ttlSeconds = CacheTtl.withJitter(CACHE_NULL_TTL, TimeUnit.MINUTES, CACHE_NULL_TTL_JITTER_SECONDS);
+            stringRedisTemplate.expire(CACHE_SHOP_TYPE_KEY, ttlSeconds, TimeUnit.SECONDS);
             return Result.fail("商铺类型不存在");
         }
 
@@ -68,7 +70,8 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
         for (ShopType shopType : shopTypeList) {
             stringRedisTemplate.opsForZSet().add(CACHE_SHOP_TYPE_KEY, JSONUtil.toJsonStr(shopType), shopType.getSort());
         }
-        stringRedisTemplate.expire(CACHE_SHOP_TYPE_KEY, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        long ttlSeconds = CacheTtl.withJitter(CACHE_SHOP_TTL, TimeUnit.MINUTES, CACHE_TTL_JITTER_SECONDS);
+        stringRedisTemplate.expire(CACHE_SHOP_TYPE_KEY, ttlSeconds, TimeUnit.SECONDS);
 
         // 6.返回结果
         return Result.ok(shopTypeList);
