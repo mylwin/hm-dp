@@ -2,6 +2,7 @@ package com.hmdp.config;
 
 
 import com.hmdp.dto.Result;
+import com.hmdp.utils.CacheRebuildBusyException;
 import io.jsonwebtoken.JwtException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -30,6 +31,11 @@ public class WebExceptionAdvice {
     public Result handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {
         log.warn("上传文件大小超过限制", e);
         return Result.fail("上传文件不能超过100MB");
+    }
+
+    @ExceptionHandler(CacheRebuildBusyException.class)
+    public Result handleCacheRebuildBusyException(CacheRebuildBusyException e) {
+        return Result.fail(e.getMessage());
     }
 
     @ExceptionHandler(RuntimeException.class)

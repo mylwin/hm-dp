@@ -4,9 +4,9 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
-import com.hmdp.dto.Result;
-import com.hmdp.entity.Shop;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -30,6 +30,11 @@ import static com.hmdp.utils.RedisConstants.*;
 public class CacheClient {
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    @Autowired
+    private RedissonClient redissonClient;
+
+    private static final long MUTEX_WAIT_SECONDS = 1L;
 
     private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 
@@ -138,20 +143,13 @@ public class CacheClient {
         }
 
         // 3.缓存未命中，尝试获取互斥锁重建缓存（缓存击穿保护）
-        String lockKey = LOCK_KEY + type.getSimpleName() + ":" + id;
-        boolean isLocked = tryLock(lockKey);
-        T dbData = null;
-        if (!isLocked) {
-            // 3.1.未获取到锁，休眠后重试
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-            return queryWithMutex(keyPrefix, id, type, dbFallback, time, timeUnit);
-        }
-        // 3.2.获取到锁，再次检测redis缓存是否存在（双重检测）
+        // 独立命名空间，避免与逻辑过期路径的旧字符串锁发生Redis类型冲突。
+        RLock lock = redissonClient.getLock(LOCK_KEY + "cache:mutex:" + key);
+        boolean locked = false;
         try {
+            // 有限等待替代递归重试；不指定租期，使用Redisson看门狗续期。
+            locked = lock.tryLock(MUTEX_WAIT_SECONDS, TimeUnit.SECONDS);
+            // 无论是否获得锁，都检查等待期间其他请求是否已经完成重建。
             json = stringRedisTemplate.opsForValue().get(key);
             if (StrUtil.isNotBlank(json)) {
                 // 其他线程已重建缓存，直接返回
@@ -160,9 +158,12 @@ public class CacheClient {
             if (json != null) {
                 return null;
             }
+            if (!locked) {
+                throw new CacheRebuildBusyException("系统繁忙，请稍后再试");
+            }
 
             // 4.缓存确实不存在，查询数据库
-            dbData = dbFallback.apply(id);
+            T dbData = dbFallback.apply(id);
 
             // 5.数据库中不存在，往redis中写入空并返回错误状态（直接写原生命令，避免二次序列化）
             if (dbData == null) {
@@ -172,14 +173,16 @@ public class CacheClient {
 
             // 6.存在，将数据库信息写入redis，设置缓存时间
             this.set(key, dbData, time, timeUnit);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+            return dbData;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CacheRebuildBusyException("操作被中断，请稍后再试", e);
         } finally {
-            // 7.释放锁（只有获取到锁的线程才会执行到这里）
-            unlock(lockKey);
+            // 仅释放当前线程仍持有的锁，不再直接删除Redis锁Key。
+            if (locked && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
         }
-        // 8.返回结果
-        return dbData;
     }
 
     /**
