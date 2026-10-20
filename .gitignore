@@ -1,6 +1,9 @@
 # --- Claude ---
 .claude/
 
+# Docker Compose 本地覆盖配置
+/.env
+
 # --- IDE ---
 .idea/
 *.iml
@@ -29,3 +32,4 @@ desktop.ini
 /frontend/nginx-1.18.0/jmeter.log
 /jmeter.log
 *.sh
+!/docker/redis/healthcheck.sh
