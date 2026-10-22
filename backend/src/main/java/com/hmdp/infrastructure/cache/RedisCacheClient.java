@@ -19,6 +19,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.function.Consumer;
 
 import static com.hmdp.constants.CacheConstants.*;
 import static com.hmdp.constants.LockConstants.*;
@@ -140,6 +141,25 @@ public class RedisCacheClient {
      */
     public <T, ID> T queryWithMutex(
             String keyPrefix, ID id, Class<T> type, Function<ID, T> dbFallback, Long time, TimeUnit timeUnit) {
+        return queryWithMutex(keyPrefix, id, type, dbFallback, time, timeUnit, ignored -> {
+        });
+    }
+
+    /**
+     * 可选的缓存未命中观察回调，无返回值，不能据此跳过数据库查询。
+     *
+     * @param keyPrefix    缓存key的前缀
+     * @param id           id
+     * @param type         返回对象的类型
+     * @param dbFallback   读数据库的函数
+     * @param time         过期时间
+     * @param timeUnit     时间单位
+     * @param missObserver 缓存未命中观察回调
+     * @return 查询结果
+     */
+    public <T, ID> T queryWithMutex(
+            String keyPrefix, ID id, Class<T> type, Function<ID, T> dbFallback, Long time, TimeUnit timeUnit,
+            Consumer<ID> missObserver) {
         // 1.从 redis 查询商铺信息
         String key = keyPrefix + id;
         String json = stringRedisTemplate.opsForValue().get(key);
@@ -153,6 +173,8 @@ public class RedisCacheClient {
         if (json != null) {
             return null;
         }
+
+        missObserver.accept(id);
 
         // 3.缓存未命中，尝试获取互斥锁重建缓存（缓存击穿保护）
         // 独立命名空间，避免与逻辑过期路径的旧字符串锁发生Redis类型冲突。
@@ -199,6 +221,7 @@ public class RedisCacheClient {
 
     /**
      * 立即申请回源许可；仅限制查询数据库的阶段，不占用许可等待缓存写入。
+     *
      * @param id         id
      * @param dbFallback 读数据库的函数
      * @return 查询结果

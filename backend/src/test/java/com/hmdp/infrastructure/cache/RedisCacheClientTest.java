@@ -2,6 +2,7 @@ package com.hmdp.infrastructure.cache;
 
 import cn.hutool.json.JSONUtil;
 import com.hmdp.config.CacheProperties;
+import com.hmdp.infrastructure.cache.bloom.ShopBloomFilter;
 import com.hmdp.entity.Shop;
 import com.hmdp.exception.CacheRebuildBusyException;
 import com.hmdp.exception.GlobalExceptionHandler;
@@ -19,6 +20,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Function;
+import java.util.function.Consumer;
 
 import static com.hmdp.constants.CacheConstants.*;
 import static com.hmdp.constants.LockConstants.*;
@@ -234,5 +236,36 @@ class RedisCacheClientTest {
         assertSame(failure, assertThrows(IllegalStateException.class, this::query));
         assertSame(shop, query());
         verify(lock, times(3)).unlock();
+    }
+
+    @Test
+    void bloomNegativeObservationCannotRejectExistingShop() throws Exception {
+        ShopBloomFilter bloom = mock(ShopBloomFilter.class);
+        when(bloom.observe(1L)).thenReturn(ShopBloomFilter.Observation.ABSENT);
+        when(lock.tryLock(1, TimeUnit.SECONDS)).thenReturn(true);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
+        Shop shop = new Shop();
+        shop.setId(1L);
+        when(database.apply(1L)).thenReturn(shop);
+        Shop result = client.queryWithMutex(CACHE_SHOP_KEY, 1L, Shop.class,
+                database, CACHE_SHOP_TTL, TimeUnit.MINUTES, bloom::observe);
+        assertSame(shop, result);
+        verify(bloom).observe(1L);
+        verify(database).apply(1L);
+        verify(lock).unlock();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cachedDataAndEmptyMarkerSkipObserver() {
+        Consumer<Long> observer = mock(Consumer.class);
+        Shop shop = new Shop();
+        shop.setId(1L);
+        when(values.get(key)).thenReturn(JSONUtil.toJsonStr(shop), "");
+        assertEquals(1L, client.queryWithMutex(CACHE_SHOP_KEY, 1L, Shop.class,
+                database, CACHE_SHOP_TTL, TimeUnit.MINUTES, observer).getId());
+        assertNull(client.queryWithMutex(CACHE_SHOP_KEY, 1L, Shop.class,
+                database, CACHE_SHOP_TTL, TimeUnit.MINUTES, observer));
+        verifyNoInteractions(observer, database, redisson);
     }
 }

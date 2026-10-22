@@ -12,6 +12,7 @@ import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.infrastructure.cache.LogicalExpireCacheEntry;
 import com.hmdp.infrastructure.cache.RedisCacheClient;
+import com.hmdp.infrastructure.cache.bloom.ShopBloomFilter;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +53,9 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Autowired
     private RedisCacheClient redisCacheClient;
 
+    @Autowired
+    private ShopBloomFilter shopBloomFilter;
+
     // private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 
     /**
@@ -66,7 +70,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         // Shop shop = redisCacheClient.queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         // 利用互斥锁解决缓存击穿问题
-        Shop shop = redisCacheClient.queryWithMutex(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        Shop shop = redisCacheClient.queryWithMutex(CACHE_SHOP_KEY, id, Shop.class, this::getById,
+                CACHE_SHOP_TTL, TimeUnit.MINUTES, shopBloomFilter::observe);
 
         // 利用逻辑过期解决缓存击穿问题
         // Shop shop = redisCacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
