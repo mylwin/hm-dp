@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 业务缓存回源配置，启动时绑定，每个后端实例独立生效。
+ * @author myl
  */
 @Getter
 @Component

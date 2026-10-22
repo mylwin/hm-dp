@@ -33,3 +33,4 @@ desktop.ini
 /jmeter.log
 *.sh
 !/docker/redis/healthcheck.sh
+/.archify/

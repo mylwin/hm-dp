@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * 阿里云OSS属性配置类
+ * @author myl
  */
 @Component
 @ConfigurationProperties(prefix = "aliyun.oss")

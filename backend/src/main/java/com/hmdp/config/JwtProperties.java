@@ -9,6 +9,7 @@ import java.time.Duration;
 
 /**
  * JWT配置类
+ * @author myl
  */
 @Data
 @Component

@@ -2,7 +2,9 @@ package com.hmdp.constants;
 
 import cn.hutool.core.lang.UUID;
 
-/** 分布式锁与锁持有者标识常量，保留原有取值及时间单位。 */
+/**
+ * 分布式锁与锁持有者标识常量，保留原有取值及时间单位。
+ */
 public final class LockConstants {
     private LockConstants() {
     }

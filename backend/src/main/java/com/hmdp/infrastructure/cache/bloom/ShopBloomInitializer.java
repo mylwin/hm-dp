@@ -32,6 +32,7 @@ public class ShopBloomInitializer implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         // 如果未启用布隆过滤器，则不进行任何操作
         if (!properties.isEnabled()) {
+            log.debug("商铺布隆过滤器未启用，跳过快照构建");
             return;
         }
         // 尝试获取初始化锁，如果获取失败则表示有其他实例正在构建布隆过滤器，当前实例继续使用原有缓存链路
@@ -43,7 +44,12 @@ public class ShopBloomInitializer implements ApplicationRunner {
             // 多实例只允许一个构建；其他实例继续正常查询，后续读取共享就绪状态。
             locked = lock.tryLock(0, TimeUnit.SECONDS);
             // 如果获取锁失败或者已经存在就绪的快照，则当前实例继续使用原有缓存链路
-            if (!locked || bloom.hasReadySnapshot()) {
+            if (!locked) {
+                log.debug("商铺布隆快照构建锁被其他实例持有，跳过快照构建");
+                return;
+            }
+            if (bloom.hasReadySnapshot()) {
+                log.debug("商铺布隆快照已就绪，跳过快照构建");
                 return;
             }
             // 到这里说明没有已经就绪的快照，开始构建新的快照
@@ -54,8 +60,12 @@ public class ShopBloomInitializer implements ApplicationRunner {
             if (!candidate.tryInit(properties.getExpectedInsertions(), properties.getFalseProbability())) {
                 throw new IllegalStateException("新的商铺布隆快照已被初始化");
             }
+            log.debug("开始构建商铺布隆快照，版本{}，候选{}，预期容量{}，误判率{}，批量大小{}",
+                    properties.getVersion(), candidate.getName(), properties.getExpectedInsertions(),
+                    properties.getFalseProbability(), properties.getBatchSize());
             // 计算商铺ID的上界
             long upperBound = mapper.selectMaxShopIdForBloom();
+            log.debug("商铺布隆快照ID上界{}", upperBound);
             long cursor = 0;
             long count = 0;
             // 分批加载商铺ID并添加到布隆过滤器中
@@ -74,9 +84,11 @@ public class ShopBloomInitializer implements ApplicationRunner {
                 }
                 candidate.add(ids);
                 cursor = nextCursor;
+                log.debug("商铺布隆快照加载批次完成，游标{}/{}，累计{}个ID", cursor, upperBound, count);
             }
             // 发布布隆过滤器快照
             bloom.publishReady(candidate, count, upperBound);
+            log.debug("商铺布隆快照构建完成，版本{}，加载{}个ID，上界{}", properties.getVersion(), count, upperBound);
             // 已发布的快照不能作为失败候选清理，避免影响正常查询
             candidate = null;
         } catch (InterruptedException e) {

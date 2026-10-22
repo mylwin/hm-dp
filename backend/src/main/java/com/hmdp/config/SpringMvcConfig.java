@@ -18,6 +18,11 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 public class SpringMvcConfig implements WebMvcConfigurer {
     private final JwtAuthInterceptor jwtAuthInterceptor;
 
+    /**
+     * 添加拦截器
+     *
+     * @param registry 拦截器注册表
+     */
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         // 登出由服务自行解析令牌，确保无令牌和无效令牌也能幂等退出。
