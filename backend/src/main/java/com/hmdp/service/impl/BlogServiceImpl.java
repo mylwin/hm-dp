@@ -119,8 +119,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         String lockKey = LOCK_KEY + "blog:like:" + id + ":" + userId;
         RLock lock = redissonClient.getLock(lockKey);
         try {
-            // 尝试获取锁，最多等待1秒，锁3秒后自动释放（防止死锁）
-            if (!lock.tryLock(1, 3, TimeUnit.SECONDS)) {
+            // 临界区包含数据库和 Redis 操作，使用看门狗续期，避免固定租期提前过期。
+            if (!lock.tryLock(1, TimeUnit.SECONDS)) {
                 return Result.fail("操作过于频繁，请稍后再试");
             }
             String key = BLOG_LIKED_KEY + id;

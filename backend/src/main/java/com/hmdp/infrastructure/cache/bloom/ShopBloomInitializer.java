@@ -38,6 +38,7 @@ public class ShopBloomInitializer implements ApplicationRunner {
         // 尝试获取初始化锁，如果获取失败则表示有其他实例正在构建布隆过滤器，当前实例继续使用原有缓存链路
         RLock lock = null;
         boolean locked = false;
+        boolean buildStarted = false;
         RBloomFilter<Long> candidate = null;
         try {
             lock = bloom.initializationLock();
@@ -53,8 +54,9 @@ public class ShopBloomInitializer implements ApplicationRunner {
                 return;
             }
             // 到这里说明没有已经就绪的快照，开始构建新的快照
-            // 标记布隆过滤器为构建中
+            // 标记布隆过滤器为构建中；从这一步起失败才允许覆盖状态为 FAILED。
             bloom.markBuilding();
+            buildStarted = true;
             candidate = bloom.newCandidate();
             // 尝试初始化布隆过滤器，如果失败则表示有其他实例已经初始化了布隆过滤器，当前实例继续使用原有缓存链路
             if (!candidate.tryInit(properties.getExpectedInsertions(), properties.getFalseProbability())) {
@@ -97,9 +99,9 @@ public class ShopBloomInitializer implements ApplicationRunner {
             Thread.currentThread().interrupt();
             log.warn("商铺布隆快照构建等待被中断，继续使用原有缓存链路");
         } catch (RuntimeException e) {
-            log.warn("商铺布隆快照构建失败，继续使用原有缓存链路", e);
-            // 如果当前实例获取了初始化锁，则标记布隆过滤器为失败
-            if (locked) {
+            log.warn("商铺布隆快照初始化失败，继续使用原有缓存链路", e);
+            // 只有真正开始构建后才能把状态改为 FAILED，避免预检查异常覆盖其他实例的 READY 快照。
+            if (locked && buildStarted) {
                 try {
                     bloom.markFailed();
                 } catch (RuntimeException cleanupFailure) {

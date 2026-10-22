@@ -15,8 +15,8 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -62,9 +62,11 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     // private final BlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<>(1024 * 1024);
 
     /**
-     * 代理对象
+     * 延迟注入自身代理，确保消费者线程也能通过事务代理调用 createVoucherOrder。
      */
-    private IVoucherOrderService proxy;
+    @Autowired
+    @Lazy
+    private IVoucherOrderService self;
 
     /**
      * 处理订单的线程
@@ -116,9 +118,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail(r == 1 ? "库存不足！" : "请勿重复下单！");
         }
 
-        // 3.1 获取代理对象
-        proxy = (IVoucherOrderService) AopContext.currentProxy();
-        // 3.2 返回订单id
+        // 3.返回订单id
         return Result.ok(orderId);
     }
     /*@Override
@@ -299,15 +299,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 return false;
             }
             try {
-                // @Transactional 自调用问题（本质：目标对象内部的方法调用本对象的另一个带事务注解的方法）在运行时不会生效。
-                // 因此需要使用AopContext.currentProxy()获取当前代理对象，从而调用带事务注解的方法，从而开启真正的事务。
-                return proxy.createVoucherOrder(voucherOrder);
+                // 通过延迟注入的自身代理调用事务方法，避免自调用导致事务失效。
+                return self.createVoucherOrder(voucherOrder);
             } catch (Exception e) {
                 log.error("处理订单异常：", e);
                 return false;
             } finally {
-                // 5.3释放锁
-                lock.unlock();
+                // 仅释放当前线程仍持有的锁，避免锁已过期或被接管时误删。
+                if (lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
             }
         }
     }

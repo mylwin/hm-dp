@@ -65,6 +65,16 @@ class ShopBloomInitializerTest {
     }
 
     @Test
+    void preCheckFailureDoesNotOverwriteReadyState() {
+        when(bloom.hasReadySnapshot()).thenThrow(new IllegalStateException("redis unavailable"));
+        initializer.run(null);
+        verify(bloom, never()).markBuilding();
+        verify(bloom, never()).markFailed();
+        verify(bloom, never()).newCandidate();
+        verify(lock).unlock();
+    }
+
+    @Test
     void cursorLoadsAllBatchesBeforePublishing() {
         when(mapper.selectMaxShopIdForBloom()).thenReturn(9L);
         when(mapper.selectShopIdsForBloom(0, 9, 2)).thenReturn(List.of(2L, 7L));
