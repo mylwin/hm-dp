@@ -20,6 +20,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import static com.hmdp.constants.CacheConstants.*;
 import static com.hmdp.constants.LockConstants.*;
@@ -185,6 +186,32 @@ public class RedisCacheClient {
     public <T, ID> T queryWithMutex(
             String keyPrefix, ID id, Class<T> type, Function<ID, T> dbFallback, Long time, TimeUnit timeUnit,
             Consumer<ID> missObserver) {
+        // 保留只观察的原接口，观察结果不能改变原查询行为。
+        return queryWithMutexAndGuard(keyPrefix, id, type, dbFallback, time, timeUnit, missedId -> {
+            missObserver.accept(missedId);
+            return true;
+        });
+    }
+
+    /**
+     * 查询互斥缓存，仅在首次缓存未命中时由业务准入回调决定是否继续。
+     * 被拒绝的请求直接返回 null，不获取重建锁、不回源，也不写入空值缓存。
+     *
+     * @param <T> 缓存对象的类型
+     * @param <ID> 资源编号的类型
+     * @param keyPrefix 缓存键前缀，与 id 拼接形成完整缓存键
+     * @param id 待查询资源的编号
+     * @param type 用于反序列化的缓存对象类型
+     * @param dbFallback 缓存未命中且准入通过后的数据库查询函数，无记录时返回 null
+     * @param time 正常业务缓存的基础有效期，使用 timeUnit 指定的单位
+     * @param timeUnit 基础有效期的时间单位
+     * @param missGuard 首次缓存未命中时执行一次，true 继续查询，false 直接返回 null
+     * @return 缓存或数据库中的对象；命中空值、被准入拒绝或数据库无记录时返回 null
+     * @throws CacheRebuildBusyException 等锁超时且缓存仍未命中、等待被中断或回源许可已用满
+     */
+    public <T, ID> T queryWithMutexAndGuard(
+            String keyPrefix, ID id, Class<T> type, Function<ID, T> dbFallback, Long time, TimeUnit timeUnit,
+            Predicate<ID> missGuard) {
         // 1.从 redis 查询商铺信息
         String key = keyPrefix + id;
         String json = stringRedisTemplate.opsForValue().get(key);
@@ -199,7 +226,9 @@ public class RedisCacheClient {
             return null;
         }
 
-        missObserver.accept(id);
+        if (!missGuard.test(id)) {
+            return null;
+        }
 
         // 3.缓存未命中，尝试获取互斥锁重建缓存（缓存击穿保护）
         // 独立命名空间，避免与逻辑过期路径的旧字符串锁发生Redis类型冲突。

@@ -1,12 +1,11 @@
 package com.hmdp.config;
 
 import lombok.Getter;
-import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 商铺布隆过滤器配置，用于构建、观察和新增同步，当前不提供拦截开关。
+ * 商铺布隆过滤器配置，用于构建、观察、新增同步和可选的负向拦截。
  *
  * @author myl
  */
@@ -18,6 +17,10 @@ public class ShopBloomProperties {
      * 是否开启商铺布隆过滤器。
      */
     private boolean enabled = true;
+    /**
+     * 是否根据就绪快照的负向结果拦截缓存未命中请求，默认仅观察。
+     */
+    private boolean enforce = false;
     /**
      * 商铺布隆过滤器版本，用于构建快照和观察。
      */
@@ -42,6 +45,15 @@ public class ShopBloomProperties {
      */
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    /**
+     * 设置是否启用负向拦截；启用前须保证所有新增入口同步布隆过滤器。
+     *
+     * @param enforce true 表示允许拦截就绪快照明确不包含的 ID，false 表示仅观察
+     */
+    public void setEnforce(boolean enforce) {
+        this.enforce = enforce;
     }
 
     /**

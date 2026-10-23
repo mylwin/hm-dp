@@ -1,6 +1,8 @@
 package com.hmdp.service.impl;
 
 import com.hmdp.config.CacheProperties;
+import com.hmdp.config.ShopBloomProperties;
+import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.exception.CacheRebuildBusyException;
@@ -10,8 +12,14 @@ import com.hmdp.mapper.ShopMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RLock;
+import org.redisson.api.RBloomFilter;
+import org.redisson.api.RBucket;
+import org.redisson.api.RReadWriteLock;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.LongCodec;
+import org.redisson.client.codec.StringCodec;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.AbstractPlatformTransactionManager;
@@ -20,9 +28,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.constants.CacheConstants.CACHE_SHOP_KEY;
+import static com.hmdp.constants.ShopConstants.SHOP_BLOOM_STATE_KEY_PREFIX;
+import static com.hmdp.constants.ShopConstants.SHOP_BLOOM_LIFECYCLE_LOCK;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -31,6 +44,8 @@ class ShopServiceImplTest {
     private ShopMapper mapper;
     private ShopBloomFilter bloom;
     private StringRedisTemplate redis;
+    private ValueOperations<String, String> values;
+    private RedissonClient redisson;
     private RLock lifecycle;
     private RLock detail;
     private ShopServiceImpl service;
@@ -68,11 +83,14 @@ class ShopServiceImplTest {
      * @throws Exception 配置锁模拟对象时发生异常
      */
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() throws Exception {
         mapper = mock(ShopMapper.class);
         bloom = mock(ShopBloomFilter.class);
         redis = mock(StringRedisTemplate.class);
-        var redisson = mock(RedissonClient.class);
+        values = mock(ValueOperations.class);
+        when(redis.opsForValue()).thenReturn(values);
+        redisson = mock(RedissonClient.class);
         lifecycle = mock(RLock.class);
         detail = mock(RLock.class);
         when(bloom.creationLock()).thenReturn(lifecycle);
@@ -98,6 +116,7 @@ class ShopServiceImplTest {
         service = new ShopServiceImpl();
         RedisCacheClient cacheClient = new RedisCacheClient(new CacheProperties());
         ReflectionTestUtils.setField(cacheClient, "redissonClient", redisson);
+        ReflectionTestUtils.setField(cacheClient, "stringRedisTemplate", redis);
         ReflectionTestUtils.setField(service, "baseMapper", mapper);
         ReflectionTestUtils.setField(service, "shopBloomFilter", bloom);
         ReflectionTestUtils.setField(service, "redisCacheClient", cacheClient);
@@ -200,5 +219,106 @@ class ShopServiceImplTest {
         assertThrows(IllegalArgumentException.class, () -> service.createShop(shop));
         assertThrows(IllegalArgumentException.class, () -> service.createShop(null));
         verifyNoInteractions(mapper, bloom, redis);
+    }
+
+    /** 验证无效查询编号在接触缓存、锁和数据库之前返回参数错误。 */
+    @Test
+    void invalidQueryIdsDoNotAccessDependencies() {
+        assertFalse(service.queryById(null).getSuccess());
+        assertFalse(service.queryById(0L).getSuccess());
+        assertFalse(service.queryById(-1L).getSuccess());
+        verifyNoInteractions(mapper, bloom, redis, redisson, values);
+    }
+
+    /** 验证布隆拒绝在实际业务链路中返回不存在，不加锁、不查数据库、不写空值。 */
+    @Test
+    void rejectedShopQueryReturnsNotFoundWithoutFallback() {
+        when(bloom.allowCacheMiss(42L)).thenReturn(false);
+        Result result = service.queryById(42L);
+        assertFalse(result.getSuccess());
+        assertEquals("店铺不存在！", result.getErrorMsg());
+        verify(bloom, times(1)).allowCacheMiss(42L);
+        verifyNoInteractions(mapper, redisson);
+        verify(values).get(CACHE_SHOP_KEY + 42);
+        verifyNoMoreInteractions(values);
+    }
+
+    /** 验证正常缓存与空值缓存命中均不会调用布隆准入。 */
+    @Test
+    void shopCacheHitsSkipBloomAdmission() {
+        Shop shop = new Shop();
+        shop.setId(42L);
+        when(values.get(CACHE_SHOP_KEY + 42)).thenReturn(JSONUtil.toJsonStr(shop), "");
+        Result cached = service.queryById(42L);
+        assertTrue(cached.getSuccess());
+        assertEquals(42L, ((Shop) cached.getData()).getId());
+        assertFalse(service.queryById(42L).getSuccess());
+        verifyNoInteractions(bloom, mapper, redisson);
+    }
+
+    /** 验证布隆可能存在但数据库无记录时，仍由空值缓存兜底。 */
+    @Test
+    void bloomFalsePositiveStillUsesDatabaseAndNegativeCache() {
+        when(bloom.allowCacheMiss(42L)).thenReturn(true);
+        assertFalse(service.queryById(42L).getSuccess());
+        verify(mapper).selectById(42L);
+        verify(values).set(eq(CACHE_SHOP_KEY + 42), eq(""),
+                longThat(ttl -> ttl >= 120 && ttl <= 150), eq(TimeUnit.SECONDS));
+        verify(detail).unlock();
+    }
+
+    /** 验证准入通过后可返回数据库中的真实商铺并回填正常缓存。 */
+    @Test
+    void admittedExistingShopReturnsDatabaseRecord() {
+        Shop shop = new Shop();
+        shop.setId(42L);
+        when(bloom.allowCacheMiss(42L)).thenReturn(true);
+        when(mapper.selectById(42L)).thenReturn(shop);
+        Result result = service.queryById(42L);
+        assertTrue(result.getSuccess());
+        assertSame(shop, result.getData());
+        verify(values).set(eq(CACHE_SHOP_KEY + 42), eq(JSONUtil.toJsonStr(shop)),
+                longThat(ttl -> ttl >= 1800 && ttl <= 2100), eq(TimeUnit.SECONDS));
+    }
+
+    /**
+     * 验证第二阶段新增同步后，第三阶段启用的真实布隆准入逻辑不会拒绝新商铺。
+     * 布隆位集合、数据库和 Redis 使用模拟对象，不代表真实依赖联调。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void newlyCreatedShopPassesEnforcedBloomAdmission() {
+        ShopBloomProperties properties = new ShopBloomProperties();
+        properties.setEnforce(true);
+        RBucket<String> state = mock(RBucket.class);
+        RBloomFilter<Long> filter = mock(RBloomFilter.class);
+        when(redisson.<String>getBucket(SHOP_BLOOM_STATE_KEY_PREFIX + "v1", StringCodec.INSTANCE))
+                .thenReturn(state);
+        when(redisson.<Long>getBloomFilter("snapshot-1", LongCodec.INSTANCE)).thenReturn(filter);
+        when(state.get()).thenReturn(JSONUtil.toJsonStr(Map.of(
+                "status", "READY", "syncProtocol", 2, "filterName", "snapshot-1",
+                "expectedInsertions", 100_000, "falseProbability", 0.001)));
+        when(filter.isExists()).thenReturn(true);
+        Set<Long> members = new HashSet<>();
+        when(filter.add(anyLong())).thenAnswer(call -> members.add(call.getArgument(0)));
+        when(filter.contains(anyLong())).thenAnswer(call -> members.contains(call.getArgument(0)));
+        var readWriteLock = mock(RReadWriteLock.class);
+        when(redisson.getReadWriteLock(SHOP_BLOOM_LIFECYCLE_LOCK))
+                .thenReturn(readWriteLock);
+        when(readWriteLock.readLock()).thenReturn(lifecycle);
+        ShopBloomFilter realBloom = new ShopBloomFilter(properties, redisson);
+        ReflectionTestUtils.setField(service, "shopBloomFilter", realBloom);
+        Shop shop = new Shop();
+
+        assertTrue(service.createShop(shop).getSuccess());
+        assertTrue(events.contains("commit"));
+        when(mapper.selectById(42L)).thenReturn(shop);
+        Result result = service.queryById(42L);
+
+        assertTrue(result.getSuccess());
+        assertSame(shop, result.getData());
+        assertEquals(0, realBloom.rejectedCount());
+        verify(filter).add(42L);
+        verify(filter).contains(42L);
     }
 }

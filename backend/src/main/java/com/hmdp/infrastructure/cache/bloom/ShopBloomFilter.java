@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.LongAdder;
 import static com.hmdp.constants.ShopConstants.*;
 
 /**
- * 商铺ID快照、新增同步及观察计数。当前判断结果仍不用于拒绝业务查询。
+ * 商铺 ID 快照、新增同步与查询准入，默认仅观察，可配置启用负向拦截。
  *
  * @author myl
  */
@@ -51,6 +51,10 @@ public class ShopBloomFilter {
      * 失败计数器
      */
     private final LongAdder failures = new LongAdder();
+    /**
+     * 仅累计当前实例实际阻止继续查询的次数，不混用负向观察次数。
+     */
+    private final LongAdder rejected = new LongAdder();
     /**
      * 当前活动的过滤器句柄
      */
@@ -98,6 +102,33 @@ public class ShopBloomFilter {
      */
     public Statistics statistics() {
         return new Statistics(mightExist.sum(), absent.sum(), notReady.sum(), failures.sum());
+    }
+
+    /**
+     * 判断缓存未命中请求是否可以继续执行原有查询，同时记录一次布隆观察。
+     * 只有拦截开启且就绪快照明确不包含该 ID 时拒绝，其他结果均继续查询。
+     *
+     * @param id 缓存未命中的商铺正数编号，无效编号无法产生可拦截的负向结果
+     * @return false 表示本次请求被布隆拦截，true 表示继续互斥缓存查询流程
+     */
+    public boolean allowCacheMiss(Long id) {
+        Observation observation = observe(id);
+        // 如果开启拦截且观察结果为ABSENT，则拒绝
+        if (properties.isEnforce() && observation == Observation.ABSENT) {
+            // 统计拦截次数
+            rejected.increment();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 获取当前实例实际发生的布隆负向拦截次数。
+     *
+     * @return 自实例启动起累计的拦截次数，观察模式下不会增加
+     */
+    public long rejectedCount() {
+        return rejected.sum();
     }
 
     /**
@@ -269,8 +300,8 @@ public class ShopBloomFilter {
                 "loadedCount", loadedCount,
                 "upperBound", upperBound,
                 "builtAt", Instant.now().toString())));
-        log.info("商铺布隆快照已就绪，仅观察：version={}, loadedCount={}, upperBound={}",
-                properties.getVersion(), loadedCount, upperBound);
+        log.info("商铺布隆快照已就绪：version={}, loadedCount={}, upperBound={}, enforce={}",
+                properties.getVersion(), loadedCount, upperBound, properties.isEnforce());
     }
 
     /**

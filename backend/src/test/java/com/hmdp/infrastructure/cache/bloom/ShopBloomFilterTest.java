@@ -144,4 +144,76 @@ class ShopBloomFilterTest {
         assertSame(read, bloom.creationLock());
         assertSame(write, bloom.initializationLock());
     }
+
+    /** 验证观察模式中的负向结果仍允许继续查询，不累计实际拦截次数。 */
+    @Test
+    void observationModeAllowsNegativeResults() {
+        when(state.get()).thenReturn(ready(100_000));
+        when(filter.isExists()).thenReturn(true);
+        assertTrue(bloom.allowCacheMiss(42L));
+        assertEquals(1, bloom.statistics().absent());
+        assertEquals(0, bloom.rejectedCount());
+    }
+
+    /** 验证启用后只在准入入口拦截负向结果，直接观察不会累计实际拦截次数。 */
+    @Test
+    void enforcedNegativeResultRejectsOnlyAdmissionCalls() {
+        properties.setEnforce(true);
+        when(state.get()).thenReturn(ready(100_000));
+        when(filter.isExists()).thenReturn(true);
+        assertEquals(ShopBloomFilter.Observation.ABSENT, bloom.observe(42L));
+        assertEquals(0, bloom.rejectedCount());
+        assertFalse(bloom.allowCacheMiss(42L));
+        assertEquals(2, bloom.statistics().absent());
+        assertEquals(1, bloom.rejectedCount());
+        verify(filter, times(2)).contains(42L);
+    }
+
+    /** 验证可能包含的 ID 始终继续查询，留给数据库识别真实存在与误判。 */
+    @Test
+    void enforcedPossibleMatchContinuesQuery() {
+        properties.setEnforce(true);
+        when(state.get()).thenReturn(ready(100_000));
+        when(filter.isExists()).thenReturn(true);
+        when(filter.contains(42L)).thenReturn(true);
+        assertTrue(bloom.allowCacheMiss(42L));
+        assertEquals(1, bloom.statistics().mightExist());
+        assertEquals(0, bloom.rejectedCount());
+    }
+
+    /** 验证组件关闭优先于拦截配置，不访问布隆状态。 */
+    @Test
+    void disabledBloomCannotRejectEvenWhenEnforcementIsConfigured() {
+        properties.setEnabled(false);
+        properties.setEnforce(true);
+        assertTrue(bloom.allowCacheMiss(42L));
+        assertEquals(0, bloom.rejectedCount());
+        verifyNoInteractions(redisson);
+    }
+
+    /** 验证未就绪、旧协议、配置不匹配或过滤器缺失时都继续查询。 */
+    @Test
+    void enforcementCannotUseIncompleteOrIncompatibleSnapshots() {
+        properties.setEnforce(true);
+        var legacy = JSONUtil.parseObj(ready(100_000));
+        legacy.remove("syncProtocol");
+        when(state.get()).thenReturn(null, "{\"status\":\"BUILDING\"}", "{\"status\":\"FAILED\"}",
+                ready(1), legacy.toString(), ready(100_000));
+        for (int i = 0; i < 6; i++) {
+            assertTrue(bloom.allowCacheMiss(42L));
+        }
+        assertEquals(6, bloom.statistics().notReady());
+        assertEquals(0, bloom.rejectedCount());
+        verify(filter, never()).contains(anyLong());
+    }
+
+    /** 验证沿用的观察异常处理不会被误当成负向拦截依据。 */
+    @Test
+    void observationFailureCannotBecomeARejection() {
+        properties.setEnforce(true);
+        when(state.get()).thenThrow(new IllegalStateException("observation unavailable"));
+        assertTrue(bloom.allowCacheMiss(42L));
+        assertEquals(1, bloom.statistics().failures());
+        assertEquals(0, bloom.rejectedCount());
+    }
 }

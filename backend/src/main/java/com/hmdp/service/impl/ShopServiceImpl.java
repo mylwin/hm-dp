@@ -167,19 +167,22 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     // private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 
     /**
-     * 根据id查询商铺信息
+     * 根据正数编号查询商铺，缓存未命中时按布隆配置决定是否继续回源。
      *
-     * @param id 商铺id
-     * @return 商铺信息
+     * @param id 商铺编号，必须为正数
+     * @return 成功结果包含商铺信息；编号无效或商铺不存在时返回失败结果
      */
     @Override
     public Result queryById(Long id) {
+        if (id == null || id <= 0) {
+            return Result.fail("店铺id必须为正数");
+        }
         // 缓存空值解决缓存穿透问题
         // Shop shop = redisCacheClient.queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         // 利用互斥锁解决缓存击穿问题
-        Shop shop = redisCacheClient.queryWithMutex(CACHE_SHOP_KEY, id, Shop.class, this::getById,
-                CACHE_SHOP_TTL, TimeUnit.MINUTES, shopBloomFilter::observe);
+        Shop shop = redisCacheClient.queryWithMutexAndGuard(CACHE_SHOP_KEY, id, Shop.class, this::getById,
+                CACHE_SHOP_TTL, TimeUnit.MINUTES, shopBloomFilter::allowCacheMiss);
 
         // 利用逻辑过期解决缓存击穿问题
         // Shop shop = redisCacheClient.queryWithLogicalExpire(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);

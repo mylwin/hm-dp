@@ -62,8 +62,9 @@ hmdp:
     # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。
     max-concurrent-fallbacks: ${CACHE_MAX_CONCURRENT_FALLBACKS:10}
     shop-bloom:
-      # 第一阶段固定只观察、不拦截；修改版本可构建新的ID快照。
+      # 默认只观察；开启拦截前须确认所有新增入口同步快照，导入数据后应重建。
       enabled: ${SHOP_BLOOM_ENABLED:true}  # 是否开启
+      enforce: ${SHOP_BLOOM_ENFORCE:false}  # 是否启用负向拦截，修改后重启生效
       version: ${SHOP_BLOOM_VERSION:v1}  # 版本
       expected-insertions: ${SHOP_BLOOM_EXPECTED_INSERTIONS:100000}  # 预期插入数量
       false-probability: ${SHOP_BLOOM_FALSE_PROBABILITY:0.001}  # 误判概率

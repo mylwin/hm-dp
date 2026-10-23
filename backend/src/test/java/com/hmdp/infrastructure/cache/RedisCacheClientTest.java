@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Function;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import static com.hmdp.constants.CacheConstants.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -294,5 +295,46 @@ class RedisCacheClientTest {
         assertNull(client.queryWithMutex(CACHE_SHOP_KEY, 1L, Shop.class,
                 database, CACHE_SHOP_TTL, TimeUnit.MINUTES, observer));
         verifyNoInteractions(observer, database, redisson);
+    }
+
+    /** 验证准入拒绝发生在获取锁及回源之前，并且不为随机 ID 写入空值。 */
+    @Test
+    void rejectedMissDoesNotLockQueryOrWriteNegativeCache() {
+        assertNull(client.queryWithMutexAndGuard(CACHE_SHOP_KEY, 1L, Shop.class,
+                database, CACHE_SHOP_TTL, TimeUnit.MINUTES, ignored -> false));
+        verify(values, times(1)).get(key);
+        verifyNoMoreInteractions(values);
+        verifyNoInteractions(redisson, database);
+    }
+
+    /** 验证正常缓存和空值标记命中时均跳过准入回调。 */
+    @Test
+    @SuppressWarnings("unchecked")
+    void cacheHitsSkipAdmissionGuard() {
+        Predicate<Long> guard = mock(Predicate.class);
+        Shop shop = new Shop();
+        shop.setId(1L);
+        when(values.get(key)).thenReturn(JSONUtil.toJsonStr(shop), "");
+        assertEquals(1L, client.queryWithMutexAndGuard(CACHE_SHOP_KEY, 1L, Shop.class,
+                database, CACHE_SHOP_TTL, TimeUnit.MINUTES, guard).getId());
+        assertNull(client.queryWithMutexAndGuard(CACHE_SHOP_KEY, 1L, Shop.class,
+                database, CACHE_SHOP_TTL, TimeUnit.MINUTES, guard));
+        verifyNoInteractions(guard, database, redisson);
+    }
+
+    /**
+     * 验证准入通过后仍执行数据库查询，真实无记录时保留随机 TTL 空值缓存。
+     *
+     * @throws Exception 配置锁模拟对象时发生异常
+     */
+    @Test
+    void allowedMissKeepsNegativeCacheFallback() throws Exception {
+        when(lock.tryLock(1, TimeUnit.SECONDS)).thenReturn(true);
+        when(lock.isHeldByCurrentThread()).thenReturn(true);
+        assertNull(client.queryWithMutexAndGuard(CACHE_SHOP_KEY, 1L, Shop.class,
+                database, CACHE_SHOP_TTL, TimeUnit.MINUTES, ignored -> true));
+        verify(database).apply(1L);
+        verify(values).set(eq(key), eq(""), longThat(ttl -> ttl >= 120 && ttl <= 150), eq(TimeUnit.SECONDS));
+        verify(lock).unlock();
     }
 }

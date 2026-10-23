@@ -21,6 +21,26 @@ class ShopBloomPropertiesTest {
     @EnableConfigurationProperties(ShopBloomProperties.class)
     static class TestConfiguration { }
 
+    /** 验证默认开启布隆组件，但保持只观察，避免升级时自动启用拦截。 */
+    @Test
+    void enforcementIsDisabledByDefault() {
+        runner.run(context -> {
+            var properties = context.getBean(ShopBloomProperties.class);
+            assertThat(properties.isEnabled()).isTrue();
+            assertThat(properties.isEnforce()).isFalse();
+        });
+    }
+
+    /** 验证负向拦截配置可独立绑定，不改变组件启用状态。 */
+    @Test
+    void bindsEnforcementConfiguration() {
+        runner.withPropertyValues("hmdp.cache.shop-bloom.enforce=true").run(context -> {
+            var properties = context.getBean(ShopBloomProperties.class);
+            assertThat(properties.isEnabled()).isTrue();
+            assertThat(properties.isEnforce()).isTrue();
+        });
+    }
+
     @Test
     void bindsObservationConfiguration() {
         runner.withPropertyValues("hmdp.cache.shop-bloom.enabled=false", "hmdp.cache.shop-bloom.version=v2",

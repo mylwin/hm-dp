@@ -25,10 +25,10 @@ public interface IShopService extends IService<Shop> {
     Result createShop(Shop shop);
 
     /**
-     * 根据id查询商铺信息
+     * 根据正数编号查询商铺，缓存未命中时执行可配置的布隆准入。
      *
-     * @param id 商铺id
-     * @return 商铺信息
+     * @param id 商铺编号，必须为正数
+     * @return 成功结果包含商铺信息；编号无效或商铺不存在时返回失败结果
      */
     Result queryById(Long id);
 
