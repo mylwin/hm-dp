@@ -34,15 +34,14 @@ public class ShopController {
 
     /**
      * 新增商铺信息
-     * @param shop 商铺数据
-     * @return 商铺id
+     *
+     * @param shop 待新增的商铺数据，指定编号时必须为正数
+     * @return 成功结果，data 为新增商铺的正数编号
      */
     @PostMapping
     public Result saveShop(@RequestBody Shop shop) {
-        // 写入数据库
-        shopService.save(shop);
-        // 返回店铺id
-        return Result.ok(shop.getId());
+        // 由业务入口统一完成保存、提交前布隆同步、提交后缓存清理。
+        return shopService.createShop(shop);
     }
 
     /**

@@ -36,7 +36,7 @@ class ShopBloomFilterTest {
     }
 
     private String ready(long capacity) {
-        return JSONUtil.toJsonStr(Map.of("status", "READY", "filterName", "snapshot-1",
+        return JSONUtil.toJsonStr(Map.of("status", "READY", "syncProtocol", 2, "filterName", "snapshot-1",
                 "expectedInsertions", capacity, "falseProbability", 0.001));
     }
 
@@ -99,5 +99,49 @@ class ShopBloomFilterTest {
                     && data.getLong("upperBound") == 20L
                     && data.getLong("expectedInsertions") == 100_000L;
         }));
+    }
+
+    @Test
+    void legacySnapshotWithoutSynchronizationProtocolIsNotReused() {
+        when(state.get()).thenReturn(ready(100_000).replace("\"syncProtocol\":2,", "")
+                .replace(",\"syncProtocol\":2", ""));
+        assertEquals(ShopBloomFilter.Observation.NOT_READY, bloom.observe(1L));
+        assertFalse(bloom.hasReadySnapshot());
+    }
+
+    @Test
+    void addsNewIdToReadySnapshotBeforeCommit() {
+        when(state.get()).thenReturn(ready(100_000));
+        when(filter.isExists()).thenReturn(true);
+        bloom.addBeforeCommit(42L);
+        // add返回false可能仅表示位已存在，不应错误取消数据库事务。
+        verify(filter).add(42L);
+    }
+
+    @Test
+    void noReadySnapshotDefersInclusionToNextFullScan() {
+        when(state.get()).thenReturn("{\"status\":\"BUILDING\"}");
+        bloom.addBeforeCommit(42L);
+        verifyNoInteractions(filter);
+    }
+
+    @Test
+    void synchronizationErrorEscapesSoCallerCanRollBackDatabase() {
+        when(state.get()).thenReturn(ready(100_000));
+        when(filter.isExists()).thenReturn(true);
+        when(filter.add(42L)).thenThrow(new IllegalStateException("sync failed"));
+        assertThrows(IllegalStateException.class, () -> bloom.addBeforeCommit(42L));
+    }
+
+    @Test
+    void creationAndInitializationUseOppositeSidesOfSameGlobalLock() {
+        var lifecycle = mock(org.redisson.api.RReadWriteLock.class);
+        var read = mock(org.redisson.api.RLock.class);
+        var write = mock(org.redisson.api.RLock.class);
+        when(redisson.getReadWriteLock(SHOP_BLOOM_LIFECYCLE_LOCK)).thenReturn(lifecycle);
+        when(lifecycle.readLock()).thenReturn(read);
+        when(lifecycle.writeLock()).thenReturn(write);
+        assertSame(read, bloom.creationLock());
+        assertSame(write, bloom.initializationLock());
     }
 }

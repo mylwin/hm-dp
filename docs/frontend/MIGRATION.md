@@ -20,7 +20,7 @@
 | 新增内容入口 | `/stories` | 热门探店列表与分页 |
 
 新页面使用已确认的 React 路由结构。目录重构后，旧 HTML 与资源完整迁到
-`../legacy/`；原 Nginx 的 `html/hmdp` 通过相对符号链接指向该目录。
+`frontend/legacy/`；原 Nginx 的 `html/hmdp` 通过相对符号链接指向该目录。
 未切换部署或修改页面地址；不支持符号链接的环境需把 Nginx root 指向 legacy。
 
 ## 消费端接口覆盖

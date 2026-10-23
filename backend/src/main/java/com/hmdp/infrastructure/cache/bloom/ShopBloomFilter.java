@@ -17,11 +17,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.LongAdder;
 
-import static com.hmdp.constants.LockConstants.LOCK_KEY;
 import static com.hmdp.constants.ShopConstants.*;
 
 /**
- * 商铺ID快照及观察计数。第一阶段的判断结果绝不用于拒绝业务查询。
+ * 商铺ID快照、新增同步及观察计数。当前判断结果仍不用于拒绝业务查询。
+ *
  * @author myl
  */
 @Slf4j
@@ -64,8 +64,9 @@ public class ShopBloomFilter {
 
     /**
      * 构造器注入，依赖布隆过滤器配置属性和Redisson客户端
+     *
      * @param properties 布隆过滤器配置属性
-     * @param redisson Redisson客户端
+     * @param redisson   Redisson客户端
      */
     public ShopBloomFilter(ShopBloomProperties properties, RedissonClient redisson) {
         this.properties = properties;
@@ -92,6 +93,7 @@ public class ShopBloomFilter {
 
     /**
      * 获取统计信息
+     *
      * @return 统计信息
      */
     public Statistics statistics() {
@@ -100,6 +102,7 @@ public class ShopBloomFilter {
 
     /**
      * 观察给定的ID是否存在
+     *
      * @param id ID
      * @return 观察结果
      */
@@ -140,6 +143,7 @@ public class ShopBloomFilter {
 
     /**
      * 是否有就绪的快照
+     *
      * @return 如果有就绪的快照则返回true，否则返回false
      */
     boolean hasReadySnapshot() {
@@ -150,6 +154,7 @@ public class ShopBloomFilter {
 
     /**
      * 获取过滤器
+     *
      * @param name 过滤器名称
      * @return 过滤器
      */
@@ -169,6 +174,7 @@ public class ShopBloomFilter {
 
     /**
      * 尝试获取就绪的快照
+     *
      * @return 就绪的快照，或null
      */
     private JSONObject readySnapshot() {
@@ -183,6 +189,7 @@ public class ShopBloomFilter {
         // 或者概率不匹配
         // 或者过滤器名称为空，则返回null
         if (!"READY".equals(snapshot.getStr("status"))
+                || !Integer.valueOf(SHOP_BLOOM_SYNC_PROTOCOL).equals(snapshot.getInt("syncProtocol"))
                 || !Long.valueOf(properties.getExpectedInsertions()).equals(snapshot.getLong("expectedInsertions"))
                 || !Double.valueOf(properties.getFalseProbability()).equals(snapshot.getDouble("falseProbability"))
                 || snapshot.getStr("filterName") == null) {
@@ -193,14 +200,43 @@ public class ShopBloomFilter {
 
     /**
      * 获取初始化锁
+     *
      * @return 初始化锁
      */
     RLock initializationLock() {
-        return redisson.getLock(LOCK_KEY + "bloom:shop:" + properties.getVersion());
+        return redisson.getReadWriteLock(SHOP_BLOOM_LIFECYCLE_LOCK).writeLock();
+    }
+
+    /**
+     * 新增持读锁直到事务提交及缓存清理结束；不同商铺新增可并行。
+     */
+    public RLock creationLock() {
+        return redisson.getReadWriteLock(SHOP_BLOOM_LIFECYCLE_LOCK).readLock();
+    }
+
+    /**
+     * 在数据库提交前同步当前就绪过滤器；调用方必须持有creationLock。
+     */
+    public void addBeforeCommit(Long id) {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        JSONObject snapshot = readySnapshot();
+        if (snapshot == null) {
+            // 尚无第二阶段快照，后续构建会在排斥新增的写锁内扫描已提交ID。
+            return;
+        }
+        RBloomFilter<Long> current = filter(snapshot.getStr("filterName"));
+        if (!current.isExists()) {
+            throw new IllegalStateException("商铺布隆快照缺失，新增事务取消");
+        }
+        // 返回false也可能是位已设置（包括误判），不代表同步失败。
+        current.add(id);
     }
 
     /**
      * 创建一个新的候选过滤器
+     *
      * @return 新的候选过滤器
      */
     RBloomFilter<Long> newCandidate() {
@@ -217,14 +253,16 @@ public class ShopBloomFilter {
 
     /**
      * 发布就绪的过滤器
-     * @param candidate 候选过滤器
+     *
+     * @param candidate   候选过滤器
      * @param loadedCount 加载的元素数量
-     * @param upperBound 上界
+     * @param upperBound  上界
      */
     void publishReady(RBloomFilter<Long> candidate, long loadedCount, long upperBound) {
         // 完整元数据用一次SET发布，不把构建中的过滤器名称暴露给查询端。
         state().set(JSONUtil.toJsonStr(Map.of(
                 "status", "READY",
+                "syncProtocol", SHOP_BLOOM_SYNC_PROTOCOL,
                 "filterName", candidate.getName(),
                 "expectedInsertions", properties.getExpectedInsertions(),
                 "falseProbability", properties.getFalseProbability(),
@@ -244,6 +282,7 @@ public class ShopBloomFilter {
 
     /**
      * 获取布隆过滤器状态
+     *
      * @return 布隆过滤器状态
      */
     private RBucket<String> state() {

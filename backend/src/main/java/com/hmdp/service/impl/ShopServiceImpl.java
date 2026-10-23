@@ -10,11 +10,13 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.constants.PageConstants;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
+import com.hmdp.exception.CacheRebuildBusyException;
 import com.hmdp.infrastructure.cache.LogicalExpireCacheEntry;
 import com.hmdp.infrastructure.cache.RedisCacheClient;
 import com.hmdp.infrastructure.cache.bloom.ShopBloomFilter;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
+import org.redisson.api.RLock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.geo.Distance;
@@ -25,6 +27,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.domain.geo.GeoReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -55,6 +59,110 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Autowired
     private ShopBloomFilter shopBloomFilter;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    /**
+     * 保存事务内取得的详情缓存锁，供事务提交或回滚后释放。
+     */
+    private static final class DetailCacheLock {
+        /**
+         * 详情缓存锁对象。
+         */
+        private RLock lock;
+        /**
+         * 详情缓存锁是否已获取。
+         */
+        private boolean acquired;
+    }
+
+    /**
+     * 新增商铺，提交前同步布隆过滤器，提交后清理详情缓存并释放锁。
+     * 必须在活动事务之外调用，确保释放锁之前数据库已经提交。
+     *
+     * @param shop 待新增的商铺数据，不能为 null；指定编号时必须为正数
+     * @return 成功结果，data 为新增商铺的正数编号
+     * @throws IllegalArgumentException  商铺为空或指定编号不是正数
+     * @throws IllegalStateException     已存在活动事务、插入失败或布隆快照异常
+     * @throws CacheRebuildBusyException 等锁超时或线程等待锁时被中断
+     */
+    @Override
+    public Result createShop(Shop shop) {
+        if (shop == null) {
+            throw new IllegalArgumentException("商铺不能为空");
+        }
+        if (shop.getId() != null && shop.getId() <= 0) {
+            throw new IllegalArgumentException("商铺ID必须大于0");
+        }
+        // 加入外层事务会导致本方法解锁时数据仍未提交，因此拒绝这种调用方式。
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("商铺新增必须在事务外调用");
+        }
+        // 布隆过滤器生命周期读锁
+        RLock lifecycleLock = shopBloomFilter.creationLock();
+        boolean lifecycleLocked = false;
+        // 创建详情缓存锁
+        DetailCacheLock detailLock = new DetailCacheLock();
+        try {
+            // 尝试获取布隆过滤器生命周期读锁
+            lifecycleLocked = lifecycleLock.tryLock(1, TimeUnit.SECONDS);
+            if (!lifecycleLocked) {
+                throw new CacheRebuildBusyException("商铺快照正在构建，请稍后新增");
+            }
+            // 如果获得锁成功，执行新增和布隆过滤器同步
+            Long id = transactionTemplate.execute(status -> insertShopAndSyncBloom(shop, detailLock));
+            // 事务模板返回时已提交；仍持详情锁，防止旧空值在清理后再次写回。
+            stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
+            return Result.ok(id);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CacheRebuildBusyException("新增商铺被中断，请稍后再试", e);
+        } finally {
+            try {
+                // 如果获取到了详情锁并且当前线程持有该锁，则释放锁
+                if (detailLock.acquired && detailLock.lock.isHeldByCurrentThread()) {
+                    detailLock.lock.unlock();
+                }
+            } finally {
+                // 如果获取到了布隆过滤器生命周期读锁并且当前线程持有该锁，则释放锁
+                if (lifecycleLocked && lifecycleLock.isHeldByCurrentThread()) {
+                    lifecycleLock.unlock();
+                }
+            }
+        }
+    }
+
+    /**
+     * 在新增事务中插入商铺，取得详情缓存锁并同步已就绪的布隆过滤器。
+     * 通过缓存客户端获取与详情查询相同的锁，统一锁键命名。
+     * 详情锁由调用方在事务结束和缓存清理后释放。
+     *
+     * @param shop       已通过入口校验的商铺数据，插入成功后回填正数编号
+     * @param detailLock 本次新增使用的详情缓存锁及其获取状态
+     * @return 插入成功后回填的商铺正数编号
+     * @throws IllegalStateException     插入未成功、编号无效或布隆快照异常
+     * @throws CacheRebuildBusyException 详情锁等待超时或等待时被中断
+     */
+    private Long insertShopAndSyncBloom(Shop shop, DetailCacheLock detailLock) {
+        if (baseMapper.insert(shop) != 1 || shop.getId() == null || shop.getId() <= 0) {
+            throw new IllegalStateException("新增商铺失败");
+        }
+        // 详情缓存锁
+        detailLock.lock = redisCacheClient.getCacheMutexLock(CACHE_SHOP_KEY + shop.getId());
+        try {
+            detailLock.acquired = detailLock.lock.tryLock(1, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new CacheRebuildBusyException("新增商铺被中断，请稍后再试", e);
+        }
+        if (!detailLock.acquired) {
+            throw new CacheRebuildBusyException("商铺缓存正在重建，请稍后再试");
+        }
+        // 成功获取详情缓存锁，同步布隆过滤器
+        shopBloomFilter.addBeforeCommit(shop.getId());
+        return shop.getId();
+    }
 
     // private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
 
@@ -107,16 +215,16 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     /**
      * 根据类型查询商铺信息
      *
-     * @param typeId 商铺类型
+     * @param typeId  商铺类型
      * @param current 页码
-     * @param x 经度
-     * @param y 纬度
+     * @param x       经度
+     * @param y       纬度
      * @return 商铺信息
      */
     @Override
     public Result queryShopByType(Integer typeId, Integer current, Double x, Double y) {
         // 1.判断是否需要根据地理坐标查询
-        if(x == null || y == null){
+        if (x == null || y == null) {
             // 1.1 根据类型分页查询
             Page<Shop> page = query()
                     .eq("type_id", typeId)

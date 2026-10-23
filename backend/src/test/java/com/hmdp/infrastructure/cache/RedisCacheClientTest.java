@@ -23,7 +23,6 @@ import java.util.function.Function;
 import java.util.function.Consumer;
 
 import static com.hmdp.constants.CacheConstants.*;
-import static com.hmdp.constants.LockConstants.*;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -37,6 +36,7 @@ class RedisCacheClientTest {
     private RLock lock;
     private Function<Long, Shop> database;
 
+    /** 配置缓存客户端及依赖，锁模拟仅接受去除重复命名空间后的标准锁键。 */
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() {
@@ -49,7 +49,29 @@ class RedisCacheClientTest {
         ReflectionTestUtils.setField(client, "stringRedisTemplate", redis);
         ReflectionTestUtils.setField(client, "redissonClient", redisson);
         when(redis.opsForValue()).thenReturn(values);
-        when(redisson.getLock(LOCK_KEY + "cache:mutex:" + key)).thenReturn(lock);
+        when(redisson.getLock("hmdp:lock:cache:mutex:shop:1")).thenReturn(lock);
+    }
+
+    /** 验证获取锁对象不会加锁，且资源内容和自定义缓存键不会被全局替换。 */
+    @Test
+    void cacheMutexLockPreservesResourceContentWithoutAcquiringLock() {
+        assertSame(lock, client.getCacheMutexLock(key));
+        client.getCacheMutexLock(CACHE_KEY_PREFIX + "shop:hmdp:cache:42");
+        client.getCacheMutexLock("external:shop:42");
+
+        verify(redisson).getLock("hmdp:lock:cache:mutex:shop:1");
+        verify(redisson).getLock("hmdp:lock:cache:mutex:shop:hmdp:cache:42");
+        verify(redisson).getLock("hmdp:lock:cache:mutex:external:shop:42");
+        verifyNoInteractions(lock);
+    }
+
+    /** 验证没有资源标识的缓存键不会触发 Redis 锁访问。 */
+    @Test
+    void invalidCacheKeysCannotCreateMutexLocks() {
+        assertThrows(IllegalArgumentException.class, () -> client.getCacheMutexLock(null));
+        assertThrows(IllegalArgumentException.class, () -> client.getCacheMutexLock(" "));
+        assertThrows(IllegalArgumentException.class, () -> client.getCacheMutexLock(CACHE_KEY_PREFIX));
+        verifyNoInteractions(redisson);
     }
 
     private Shop query() {
@@ -164,6 +186,11 @@ class RedisCacheClientTest {
         }
     }
 
+    /**
+     * 验证不同商铺共享回源额度，额度耗尽时缓存命中仍不需要获取缓存锁。
+     *
+     * @throws Exception 模拟锁调用或并发任务等待时发生异常
+     */
     @Test
     void differentShopsShareLimitWhileCachedRequestsStillSucceed() throws Exception {
         CacheProperties properties = new CacheProperties();
@@ -202,8 +229,8 @@ class RedisCacheClientTest {
             when(values.get(CACHE_SHOP_KEY + 100L)).thenReturn("");
             assertEquals(99L, query(99L).getId());
             assertNull(query(100L));
-            verify(redisson, never()).getLock(LOCK_KEY + "cache:mutex:" + CACHE_SHOP_KEY + 99L);
-            verify(redisson, never()).getLock(LOCK_KEY + "cache:mutex:" + CACHE_SHOP_KEY + 100L);
+            verify(redisson, never()).getLock("hmdp:lock:cache:mutex:shop:99");
+            verify(redisson, never()).getLock("hmdp:lock:cache:mutex:shop:100");
 
             finishQueries.countDown();
             assertEquals(1L, first.get(5, TimeUnit.SECONDS).getId());

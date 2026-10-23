@@ -129,6 +129,27 @@ public class RedisCacheClient {
     }
 
     /**
+     * 根据完整缓存键获取对应的重建互斥锁对象，不执行加锁。
+     * 项目标准缓存键仅移除开头的缓存命名空间，其他缓存键保持原样。
+     * 例如 hmdp:cache:shop:42 对应 hmdp:lock:cache:mutex:shop:42。
+     *
+     * @param cacheKey 完整缓存键，不能为 null、空白或仅包含缓存命名空间
+     * @return 缓存键对应的 Redisson 锁对象，调用方负责获取与释放锁
+     * @throws IllegalArgumentException 缓存键为空白或移除命名空间后没有资源标识
+     */
+    public RLock getCacheMutexLock(String cacheKey) {
+        if (StrUtil.isBlank(cacheKey)) {
+            throw new IllegalArgumentException("缓存键不能为空");
+        }
+        String resourceKey = cacheKey.startsWith(CACHE_KEY_PREFIX)
+                ? cacheKey.substring(CACHE_KEY_PREFIX.length()) : cacheKey;
+        if (StrUtil.isBlank(resourceKey)) {
+            throw new IllegalArgumentException("缓存键必须包含资源标识");
+        }
+        return redissonClient.getLock(LOCK_CACHE_MUTEX_KEY + resourceKey);
+    }
+
+    /**
      * 根据指定的key查询缓存，并反序列化为指定类型，利用互斥锁解决缓存击穿问题
      *
      * @param keyPrefix  缓存key的前缀
@@ -146,8 +167,11 @@ public class RedisCacheClient {
     }
 
     /**
-     * 可选的缓存未命中观察回调，无返回值，不能据此跳过数据库查询。
+     * 利用互斥锁重建未命中的缓存，并执行不影响查询结果的可选观察回调。
+     * 通过统一入口取得缓存锁，与新增业务共享相同资源的锁。
      *
+     * @param <T>          缓存对象的类型
+     * @param <ID>         资源编号的类型
      * @param keyPrefix    缓存key的前缀
      * @param id           id
      * @param type         返回对象的类型
@@ -155,7 +179,8 @@ public class RedisCacheClient {
      * @param time         过期时间
      * @param timeUnit     时间单位
      * @param missObserver 缓存未命中观察回调
-     * @return 查询结果
+     * @return 缓存命中或数据库回源得到的对象；命中空值标记或数据库无记录时为 null
+     * @throws CacheRebuildBusyException 等锁超时且缓存仍未命中、等待被中断或回源许可已用满
      */
     public <T, ID> T queryWithMutex(
             String keyPrefix, ID id, Class<T> type, Function<ID, T> dbFallback, Long time, TimeUnit timeUnit,
@@ -178,7 +203,7 @@ public class RedisCacheClient {
 
         // 3.缓存未命中，尝试获取互斥锁重建缓存（缓存击穿保护）
         // 独立命名空间，避免与逻辑过期路径的旧字符串锁发生Redis类型冲突。
-        RLock lock = redissonClient.getLock(LOCK_KEY + "cache:mutex:" + key);
+        RLock lock = getCacheMutexLock(key);
         boolean locked = false;
         try {
             // 有限等待替代递归重试；不指定租期，使用Redisson看门狗续期。

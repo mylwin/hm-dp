@@ -15,6 +15,9 @@ public final class LockConstants {
 
     public static final String LOCK_KEY = "hmdp:lock:";
 
+    /** 缓存重建互斥锁前缀，与历史字符串锁使用不同命名空间。 */
+    public static final String LOCK_CACHE_MUTEX_KEY = LOCK_KEY + "cache:mutex:";
+
     public static final Long LOCK_TTL = 10L;
 
     public static final String ID_PREFIX_KEY = UUID.randomUUID().toString(true) + "-";

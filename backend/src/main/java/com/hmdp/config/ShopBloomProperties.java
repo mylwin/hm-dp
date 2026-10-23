@@ -6,7 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 商铺布隆过滤器第一阶段配置，仅用于构建快照和观察，不提供拦截开关。
+ * 商铺布隆过滤器配置，用于构建、观察和新增同步，当前不提供拦截开关。
  *
  * @author myl
  */

@@ -15,7 +15,10 @@ public final class CacheConstants {
     /** 业务数据缓存的最大随机偏移，单位为秒。 */
     public static final long CACHE_TTL_JITTER_SECONDS = 300L;
 
-    public static final String CACHE_SHOP_KEY = "hmdp:cache:shop:";
+    /** 项目缓存命名空间，构建锁键时仅移除开头的这一段前缀。 */
+    public static final String CACHE_KEY_PREFIX = "hmdp:cache:";
 
-    public static final String CACHE_SHOP_TYPE_KEY = "hmdp:cache:shop:type:";
+    public static final String CACHE_SHOP_KEY = CACHE_KEY_PREFIX + "shop:";
+
+    public static final String CACHE_SHOP_TYPE_KEY = CACHE_KEY_PREFIX + "shop:type:";
 }

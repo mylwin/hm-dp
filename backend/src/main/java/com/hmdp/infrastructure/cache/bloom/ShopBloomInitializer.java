@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 启动时分批构建只读ID快照，不改变新增商铺流程，不启用负向拦截。
+ * 启动时分批构建ID快照，与新增流程通过生命周期读写锁协调，不启用负向拦截。
  * @author myl
  */
 @Slf4j

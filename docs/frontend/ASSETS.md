@@ -1,5 +1,7 @@
 # 图片与图标来源
 
+除另有说明外，资源路径以项目根目录下的 `frontend/web/` 为基准。
+
 ## 图标
 
 所有界面图标均来自已安装的 `@phosphor-icons/react`，统一 regular 线条风格。
@@ -9,7 +11,7 @@
 
 ## 原项目图片
 
-`public/imgs/` 复制自 `../legacy/imgs/`，用于兼容原接口中
+`public/imgs/` 复制自 `frontend/legacy/imgs/`（项目根目录下），用于兼容原接口中
 `/imgs/...` 图片路径。探店文字与图片属于原项目示例资料，可能包含用户原文表情。
 
 `public/images/lifestyle-*.webp` 为原项目照片转换的 WebP 版本。
