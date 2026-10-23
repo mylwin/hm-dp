@@ -1,6 +1,9 @@
 package com.hmdp.constants;
 
-/** 用户昵称与签到常量，保留原有取值及时间单位。 */
+/**
+ * 用户昵称与签到常量，保留原有取值及时间单位。
+ * @author myl
+ */
 public final class UserConstants {
     private UserConstants() {
     }

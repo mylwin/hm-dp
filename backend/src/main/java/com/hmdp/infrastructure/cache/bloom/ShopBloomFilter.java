@@ -312,6 +312,27 @@ public class ShopBloomFilter {
     }
 
     /**
+     * 记录当前版本最近一次实际构建的状态，不修改查询使用的快照元数据。
+     * 调用方必须持有生命周期写锁，避免覆盖其他构建任务的记录。
+     *
+     * @param json 构建结果的 JSON，包含状态、版本、时间和可用的扫描统计
+     */
+    void recordBuildStatus(String json) {
+        redisson.<String>getBucket(SHOP_BLOOM_BUILD_STATE_KEY_PREFIX + properties.getVersion(), StringCodec.INSTANCE)
+                .set(json);
+    }
+
+    /**
+     * 读取当前版本最近一次实际构建的记录。
+     *
+     * @return 原始 JSON 记录；没有构建记录时返回 null
+     */
+    String lastBuildStatus() {
+        return redisson.<String>getBucket(SHOP_BLOOM_BUILD_STATE_KEY_PREFIX + properties.getVersion(), StringCodec.INSTANCE)
+                .get();
+    }
+
+    /**
      * 获取布隆过滤器状态
      *
      * @return 布隆过滤器状态

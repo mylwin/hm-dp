@@ -41,14 +41,25 @@
 构建持全局生命周期写锁，新增持读锁；新增还持有与详情回源相同的商铺锁，直到提交及清理结束。
 旧快照缺少 `syncProtocol=2` 时会重新构建，避免直接沿用可能漏增量的第一阶段数据。
 第二阶段的事务边界、测试和剩余限制见 [新增同步说明](docs/optimization/cache/BLOOM_FILTER_PHASE2.md)。
-第三阶段默认仍只观察；`hmdp.cache.shop-bloom.enforce` / `SHOP_BLOOM_ENFORCE`
-默认 `false`，修改后重启生效。开启后只拦截缓存未命中且就绪快照明确不包含的 ID，
+第三阶段提供 `hmdp.cache.shop-bloom.enforce` / `SHOP_BLOOM_ENFORCE` 开关。
+当前 `application.yaml` 的默认值为 `true`，可设置为 `false` 恢复观察模式，修改后重启生效。
+开启后只拦截缓存未命中且就绪快照明确不包含的 ID，
 不获取详情锁、不查库，也不为被拦截的随机 ID 写入空值缓存。
 正常缓存和空值缓存命中直接返回；可能存在、未就绪或组件关闭时继续原查询流程。
 观察异常仍沿用原有处理，不作为负向拦截依据；布隆误判由数据库和空值缓存兜底。
-启用前必须确认全部新增入口同步，直接 SQL 导入后应关闭拦截、修改版本并重建完整快照。
+启用前必须确认全部新增入口同步；直接 SQL 导入前应关闭拦截，完成后重建完整快照。
 `READY` 只说明快照已就绪，无法证明外部写入已经同步。
 具体代码对比、入口审计与验证见 [第三阶段说明](docs/optimization/cache/BLOOM_FILTER_PHASE3.md)。
+
+第四阶段增加本地 JMX 手动重建：当前 `SHOP_BLOOM_JMX_ENABLED` 默认 `true`，
+可设置为 `false` 关闭导出。启用并启动后，可通过本地 JConsole 调用
+`com.hmdp:type=ShopBloom,name=Maintenance` 的 `rebuild` 操作，反复重建当前版本，
+无需每次重启；`LastBuildStatus` 属性查看最近一次实际构建记录。
+重建复用生命周期写锁，完整成功后才发布；已有可用 READY 时保留旧快照服务查询，
+失败只清理本次候选。构建记录存放在独立的 `hmdp:bloom:shop:build:state:<version>`，
+不覆盖查询元数据。运行中重建会阻止新增取得生命周期读锁，新增等待超过 1 秒会返回繁忙。
+外部数据导入应先关闭全部查询实例的负向拦截，再导入、重建并检查 SUCCESS，最后恢复拦截。
+完整步骤与边界见 [第四阶段说明](docs/optimization/cache/BLOOM_FILTER_PHASE4.md)。
 
 ## 后端 JWT 配置
 

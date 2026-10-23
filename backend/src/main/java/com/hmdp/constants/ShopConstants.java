@@ -13,6 +13,12 @@ public final class ShopConstants {
     public static final String SHOP_BLOOM_KEY_PREFIX = "hmdp:bloom:shop:";
     public static final String SHOP_BLOOM_STATE_KEY_PREFIX = "hmdp:bloom:shop:state:";
 
+    /** 最近一次实际构建的状态，与查询使用的就绪快照状态分开存储。 */
+    public static final String SHOP_BLOOM_BUILD_STATE_KEY_PREFIX = "hmdp:bloom:shop:build:state:";
+
+    /** 本地 JMX 维护入口名称。 */
+    public static final String SHOP_BLOOM_MBEAN_NAME = "com.hmdp:type=ShopBloom,name=Maintenance";
+
     /**
      * 跨版本共享：构建持写锁，新增持读锁，防止扫描与新增之间漏同步。
      */

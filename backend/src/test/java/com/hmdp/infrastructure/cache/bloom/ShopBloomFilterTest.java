@@ -216,4 +216,25 @@ class ShopBloomFilterTest {
         assertEquals(1, bloom.statistics().failures());
         assertEquals(0, bloom.rejectedCount());
     }
+
+    /** 验证构建记录使用独立键，不覆盖第三阶段查询需要的 READY 元数据。 */
+    @Test
+    @SuppressWarnings("unchecked")
+    void buildStatusDoesNotReplaceActiveReadyMetadata() {
+        RBucket<String> buildState = mock(RBucket.class);
+        when(redisson.<String>getBucket(SHOP_BLOOM_BUILD_STATE_KEY_PREFIX + "v1", StringCodec.INSTANCE))
+                .thenReturn(buildState);
+        when(state.get()).thenReturn(ready(100_000));
+        when(filter.isExists()).thenReturn(true);
+        when(filter.contains(42L)).thenReturn(true);
+        properties.setEnforce(true);
+
+        bloom.recordBuildStatus("{\"status\":\"BUILDING\"}");
+        assertTrue(bloom.allowCacheMiss(42L));
+        when(buildState.get()).thenReturn("{\"status\":\"BUILDING\"}");
+        assertEquals("{\"status\":\"BUILDING\"}", bloom.lastBuildStatus());
+
+        verify(buildState).set("{\"status\":\"BUILDING\"}");
+        verify(state, never()).set(anyString());
+    }
 }

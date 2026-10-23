@@ -12,6 +12,7 @@
 - [商铺布隆过滤器第一阶段：快照构建与观察](optimization/cache/BLOOM_FILTER_PHASE1.md)
 - [商铺布隆过滤器第二阶段：新增同步与空值缓存清理](optimization/cache/BLOOM_FILTER_PHASE2.md)
 - [商铺布隆过滤器第三阶段：可配置负向拦截与空值兜底](optimization/cache/BLOOM_FILTER_PHASE3.md)
+- [商铺布隆过滤器第四阶段：受控重建与构建状态维护](optimization/cache/BLOOM_FILTER_PHASE4.md)
 
 阶段文档记录对应阶段的实现和限制；当前行为以最新阶段与实际代码为准。
 
