@@ -15,6 +15,15 @@
 - Lua 脚本按功能放在 `backend/src/main/resources/lua/` 的对应子目录，迁移时同步调整加载路径。
 - Redis 键的项目命名空间避免重复拼接；缓存锁通过 `RedisCacheClient.getCacheMutexLock` 统一获取，新增与查询同一资源时必须使用同一把锁，不在业务类中分别拼接锁键。
 
+## Spring 组件注册与依赖注入习惯
+
+- 项目自有业务类和基础设施组件优先使用 `@Service` / `@Component` 注册，依赖注入优先采用 `private final` 字段配合 Lombok `@RequiredArgsConstructor`，由 Spring 自动进行构造器注入。
+- 只有一个构造器时，不额外添加 `@Autowired`；无特殊初始化逻辑时，不手写与 `@RequiredArgsConstructor` 重复的构造器。
+- 配置类需要依赖其他 Bean 时，也优先使用构造器注入；第三方客户端或需要定制构造、初始化、销毁的对象，仍使用 `@Configuration` 中的 `@Bean` 创建并管理生命周期。
+- 自有组件通过组件扫描注册后，不再在配置类中使用 `@Bean` 重复创建；带配置开关的组件与其依赖保持启用条件一致，避免重复注册或关闭后仍要求注入不存在的 Bean。
+- 配置属性类优先使用 `@Component` 注册、`@ConfigurationProperties` 绑定属性，不再通过 `@EnableConfigurationProperties` 重复注册；消息 DTO、`record`、异常类等普通对象不添加组件注解。
+- 已有字段 `@Autowired` 注入可以保留；仅在当前任务涉及的类中按上述习惯新增或调整，不为统一注入风格而扩散修改无关代码。
+
 ## 文档存放约定
 
 - 项目说明、设计方案、优化记录和前端资料统一存放在 `docs/`，按主题分目录。

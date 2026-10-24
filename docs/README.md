@@ -6,6 +6,11 @@
 ## 项目优化
 
 - [项目优化建议](项目优化建议.md)
+- [RocketMQ 秒杀订单迁移方案（设计与验收计划）](plan/rocketmq-seckill-design.md)
+
+### 订单优化
+
+- [订单 RocketMQ 第一阶段：客户端接入与收发验证](optimization/order/ROCKETMQ_PHASE1.md)
 
 ### 缓存优化
 

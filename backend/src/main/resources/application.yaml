@@ -61,6 +61,17 @@ aliyun:
     bucket-name: ${dev.bucket-name}  # 桶名
 
 hmdp:
+  rocketmq:
+    # 第一阶段仅启用客户端；不会将秒杀业务从 Stream 自动切换到 RocketMQ。
+    enabled: ${ROCKETMQ_ENABLED:true}
+    name-server: ${ROCKETMQ_NAMESERVER:10.211.55.9:9876}  # NameServer服务器地址
+    producer-group: ${ROCKETMQ_PRODUCER_GROUP:hmdp-order-producer}    # 生产者组
+    order-topic: ${ROCKETMQ_ORDER_TOPIC:hmdp-seckill-order-create}  # 订单主题
+    send-timeout: ${ROCKETMQ_SEND_TIMEOUT:3s}  # 发送超时
+    send-retries: ${ROCKETMQ_SEND_RETRIES:0}  # 发送重试次数
+    vip-channel-enabled: ${ROCKETMQ_VIP_CHANNEL_ENABLED:false}  # 是否启用VIP通道
+    access-key: ${ROCKETMQ_ACCESS_KEY:}  # 访问密钥
+    secret-key: ${ROCKETMQ_SECRET_KEY:}  # 密钥
   cache:
     # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。
     max-concurrent-fallbacks: ${CACHE_MAX_CONCURRENT_FALLBACKS:10}

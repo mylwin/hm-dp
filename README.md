@@ -16,6 +16,40 @@
 
 包职责、文件迁移对照和保留代码说明见 [项目结构说明](docs/architecture/STRUCTURE.md)。
 
+## 订单 RocketMQ 改造：第一阶段
+
+本阶段接入原生 RocketMQ 5.3.2 客户端，提供订单事件的同步发送入口、
+Spring 客户端生命周期管理和独立收发测试。秒杀业务仍使用原 Redis Stream，
+尚未切换订单消费者；点赞、评论、关注和博客推送不在本次改造范围。
+后续依次实现请求账本与 MySQL Outbox、幂等建单与结果查询、补偿对账及迁移。
+
+已只读确认虚拟机 `10.211.55.9` 的 Broker 为 5.3.2，NameServer 为
+`10.211.55.9:9876`，Broker 注册地址为 `10.211.55.9:10911`，ACL 未开启。
+无需在本机 Compose 中重复部署 RocketMQ，也无需新增 Tomcat。
+
+当前配置默认启用客户端，设置 `ROCKETMQ_ENABLED=false` 可关闭；启用时在后端启动阶段创建生产者。
+此开关只控制客户端初始化，不改变秒杀通道，也不代表连接已经通过收发验证。
+配置入口为 `hmdp.rocketmq`，地址通过 `ROCKETMQ_NAMESERVER` 覆盖。
+SDK 默认不额外重试，未得到 `SEND_OK` 时向调用方报告失败或结果未知，
+调用方不能据此回补库存。当前发送组件尚不提供 Outbox 可靠投递能力。
+
+独立收发验证在项目根目录执行，不启动 Spring Boot、MySQL、Redis 或订单落库逻辑：
+
+```bash
+ROCKETMQ_SMOKE_TEST=true mvn -f backend/pom.xml -Dtest=RocketMqSmokeIT test
+```
+
+验证仅向 `hmdp-order-smoke` 发送一条合成事件，并使用独立临时消费组接收；
+不会向业务订单 Topic 投递。首次运行需在 Broker 预建测试 Topic，
+或由开发环境的 `autoCreateTopicEnable=true` 自动创建。
+普通单元测试不会执行该测试，需同时指定测试类和环境开关。
+若以后开启 ACL，通过 `ROCKETMQ_ACCESS_KEY`、`ROCKETMQ_SECRET_KEY` 配置，勿提交密钥。
+客户端文件日志默认由 SDK 写入用户日志目录，可用 JVM 参数
+`-Drocketmq.log.root=/absolute/path/to/logs` 指定位置。
+
+阶段范围、配置、测试结果和后续任务见
+[订单 RocketMQ 第一阶段说明](docs/optimization/order/ROCKETMQ_PHASE1.md)。
+
 ## 商铺详情缓存回源并发
 
 商铺详情的互斥缓存查询在锁内二次检查缓存后，才申请数据库回源许可。

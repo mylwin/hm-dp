@@ -17,9 +17,22 @@
     <properties>
         <java.version>17</java.version>
         <jjwt.version>0.13.0</jjwt.version>
+        <rocketmq.version>5.3.2</rocketmq.version>
     </properties>
 
     <dependencies>
+        <!-- 原生客户端与虚拟机 Broker 对齐，生命周期由 Spring 管理。 -->
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-client</artifactId>
+            <version>${rocketmq.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.rocketmq</groupId>
+            <artifactId>rocketmq-acl</artifactId>
+            <version>${rocketmq.version}</version>
+        </dependency>
+
         <!--spring data redis-->
         <dependency>
             <groupId>org.springframework.boot</groupId>
