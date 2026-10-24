@@ -1,0 +1,315 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "订单第二阶段：请求、投递与三张表的职责",
+    "locale": "zh-CN",
+    "output": "docs/optimization/order/diagrams/rocketmq-phase2-architecture.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "caller",
+      "type": "external",
+      "label": "内部调用 / 隔离测试",
+      "sublabel": "正式 HTTP 仍走旧 Stream",
+      "pos": [
+        40,
+        100
+      ],
+      "size": [
+        230,
+        76
+      ]
+    },
+    {
+      "id": "accept",
+      "type": "backend",
+      "label": "可靠受理服务",
+      "sublabel": "两个事务；不直接发送 MQ",
+      "tag": "默认关闭",
+      "pos": [
+        400,
+        100
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis 按订单预占",
+      "sublabel": "库存、元数据、用户与终态",
+      "pos": [
+        780,
+        100
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "control",
+      "type": "database",
+      "label": "tb_seckill_campaign_control",
+      "sublabel": "活动维护锁、READY 与 epoch",
+      "pos": [
+        40,
+        380
+      ],
+      "size": [
+        280,
+        76
+      ]
+    },
+    {
+      "id": "request",
+      "type": "database",
+      "label": "tb_seckill_request",
+      "sublabel": "原请求编号、归属、业务状态",
+      "pos": [
+        400,
+        380
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "outbox",
+      "type": "database",
+      "label": "tb_mq_outbox",
+      "sublabel": "待发内容、重试进度与租约",
+      "pos": [
+        780,
+        380
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "job",
+      "type": "backend",
+      "label": "后台定时任务",
+      "sublabel": "同一应用内运行，无新增 Tomcat",
+      "tag": "默认关闭",
+      "pos": [
+        400,
+        660
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "dispatch",
+      "type": "backend",
+      "label": "Outbox 投递器",
+      "sublabel": "短事务领取；有效令牌更新回执",
+      "tag": "默认关闭",
+      "pos": [
+        780,
+        660
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "publisher",
+      "type": "backend",
+      "label": "同步订单发布器",
+      "sublabel": "沿用第一阶段，等待发送回执",
+      "pos": [
+        780,
+        930
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "broker",
+      "type": "messagebus",
+      "label": "RocketMQ Broker",
+      "sublabel": "可靠投递仍需消费者幂等",
+      "pos": [
+        400,
+        930
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "probe",
+      "type": "external",
+      "label": "隔离探针消费者",
+      "sublabel": "仅 hmdp-order-smoke 测试",
+      "pos": [
+        40,
+        930
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "consumer",
+      "type": "backend",
+      "label": "第三阶段：正式消费者",
+      "sublabel": "幂等建单并推进业务终态",
+      "tag": "尚未实现",
+      "pos": [
+        400,
+        1200
+      ],
+      "size": [
+        250,
+        76
+      ]
+    },
+    {
+      "id": "orders",
+      "type": "database",
+      "label": "现有订单表与数据库库存",
+      "sublabel": "新链路尚未执行建单和扣库",
+      "pos": [
+        780,
+        1200
+      ],
+      "size": [
+        250,
+        76
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "MySQL：三张新增表，不是三套消息队列",
+      "wraps": [
+        "control",
+        "request",
+        "outbox"
+      ],
+      "pad": 38
+    }
+  ],
+  "connections": [
+    {
+      "id": "invoke",
+      "from": "caller",
+      "to": "accept",
+      "label": "显式调用",
+      "variant": "emphasis"
+    },
+    {
+      "id": "reserve",
+      "from": "accept",
+      "to": "redis",
+      "label": "Lua 预占"
+    },
+    {
+      "id": "control-read",
+      "from": "accept",
+      "to": "control",
+      "label": "活动共享锁"
+    },
+    {
+      "id": "request-write",
+      "from": "accept",
+      "to": "request",
+      "label": "登记与受理"
+    },
+    {
+      "id": "event-write",
+      "from": "accept",
+      "to": "outbox",
+      "label": "同事务登记"
+    },
+    {
+      "id": "trigger",
+      "from": "job",
+      "to": "dispatch",
+      "label": "定时触发"
+    },
+    {
+      "id": "outbox-access",
+      "from": "dispatch",
+      "to": "outbox",
+      "label": "领取与回执"
+    },
+    {
+      "id": "publish-call",
+      "from": "dispatch",
+      "to": "publisher",
+      "label": "事务外调用",
+      "variant": "emphasis"
+    },
+    {
+      "id": "send",
+      "from": "publisher",
+      "to": "broker",
+      "label": "同步发送",
+      "variant": "emphasis"
+    },
+    {
+      "id": "probe-receive",
+      "from": "broker",
+      "to": "probe",
+      "label": "隔离验证"
+    },
+    {
+      "id": "future-consume",
+      "from": "broker",
+      "to": "consumer",
+      "label": "后续接入",
+      "variant": "dashed"
+    },
+    {
+      "id": "future-create",
+      "from": "consumer",
+      "to": "orders",
+      "label": "后续建单扣库",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "读取方式",
+      "items": [
+        "上半部解释请求登记与 Redis 预占，下半部解释后台投递。",
+        "ACCEPTED 与 Outbox 一起提交；MQ 发送在数据库事务外。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "当前边界",
+      "items": [
+        "现有 HTTP 继续走 Redis Stream；新受理组件和投递任务默认关闭。",
+        "正式消费者、周期恢复、确认释放及受控重建尚未完成。"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "文档来源与版本",
+      "items": [
+        "此图按 2026-10-24 未提交工作区手工核对，未绑定 HEAD 自动溯源。",
+        "逐项代码依据、字段说明、状态图和故障矩阵见 ROCKETMQ_PHASE2_REVIEW.md。"
+      ]
+    }
+  ]
+}

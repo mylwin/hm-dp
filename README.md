@@ -31,7 +31,15 @@ Spring 客户端生命周期管理和独立收发测试。秒杀业务仍使用�
 此开关只控制客户端初始化，不改变秒杀通道，也不代表连接已经通过收发验证。
 配置入口为 `hmdp.rocketmq`，地址通过 `ROCKETMQ_NAMESERVER` 覆盖。
 SDK 默认不额外重试，未得到 `SEND_OK` 时向调用方报告失败或结果未知，
-调用方不能据此回补库存。当前发送组件尚不提供 Outbox 可靠投递能力。
+调用方不能据此回补库存。发送组件本身只负责同步发送，可靠重试交给第二阶段的 Outbox。
+
+第二阶段已增加独立请求账本、按订单 Redis 预占、受理与待发消息同事务提交、
+租约领取及退避投递。新受理组件和 Outbox 调度默认关闭，现有 HTTP 下单仍走 Stream；
+正式订单消费者、周期恢复和补偿尚未实施，不能仅打开开关就切换业务链路。
+具体改动、事务顺序、Mermaid 流程和隔离测试见
+[订单 RocketMQ 第二阶段说明](docs/optimization/order/ROCKETMQ_PHASE2.md)。
+架构、数据库表职责、参考工程差异和复盘问题见
+[第二阶段图解与复盘](docs/optimization/order/ROCKETMQ_PHASE2_REVIEW.md)。
 
 独立收发验证在项目根目录执行，不启动 Spring Boot、MySQL、Redis 或订单落库逻辑：
 

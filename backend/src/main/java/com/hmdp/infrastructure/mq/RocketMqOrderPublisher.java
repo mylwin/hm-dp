@@ -3,6 +3,7 @@ package com.hmdp.infrastructure.mq;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.config.RocketMqProperties;
+import com.hmdp.exception.OrderMessagePublishException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.rocketmq.client.exception.MQBrokerException;

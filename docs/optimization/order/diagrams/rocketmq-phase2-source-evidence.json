@@ -1,0 +1,127 @@
+{
+  "checked_on": "2026-10-24",
+  "current_repository_head": "5ab2f390521409356aaceb43368ca6abc5f24a27",
+  "current_scope": "未提交工作区；非 HEAD 字节溯源，未修改业务代码",
+  "reference_repository_head": "4c003dbda5d38b9c01d7533f6caf2f45ddba2f27",
+  "files": [
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/main/java/com/hmdp/service/impl/SeckillRequestServiceImpl.java",
+      "purpose": "accept / acceptLocked / transaction",
+      "sha256": "ca476cb980ab9e351845b54d21c6f46016e0c9d9c5de71a9a5be19bc772e842a",
+      "line_count": 239
+    },
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/main/java/com/hmdp/infrastructure/mq/OrderOutboxDispatcher.java",
+      "purpose": "claimNext / publishClaimed",
+      "sha256": "d811b8d1bd355c9e5234297dcc116c1f188f9729403038c1e34b588ebee551af",
+      "line_count": 122
+    },
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/main/java/com/hmdp/mapper/MqOutboxMapper.java",
+      "purpose": "SKIP LOCKED / lease token / UTC",
+      "sha256": "61fb461e30031367ff93e7f31e62e64759364fc86d42735a6f7c2e9966b8070f",
+      "line_count": 92
+    },
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/main/resources/db/migration/V20261024_02__seckill_request_outbox.sql",
+      "purpose": "三表定义及约束",
+      "sha256": "e6af7050e5dc7061e6ce1baf8017f6f12289455bf3c0cdf1db9826609a704113",
+      "line_count": 57
+    },
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/main/resources/lua/seckill/reserve-order.lua",
+      "purpose": "订单预占、拒绝终态与 epoch",
+      "sha256": "9a2ff6b63bbf961f8cd08e69b3b8d36fccd76193958777e940497e062e3e7ce4",
+      "line_count": 62
+    },
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/main/java/com/hmdp/service/impl/VoucherOrderServiceImpl.java",
+      "purpose": "旧 Stream 入口",
+      "sha256": "fd9ab46f78317faea4b827e62ddb865ba530a42eb5e554c9c22834114a11d48c",
+      "line_count": 351
+    },
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/main/resources/application.yaml",
+      "purpose": "默认开关",
+      "sha256": "d13dd34e373ed824dacb360e793f878c60e26e1d0eff31c2890e259b895f8001",
+      "line_count": 107
+    },
+    {
+      "repository": "hm-dp",
+      "path": "backend/src/test/java/com/hmdp/infrastructure/mq/SeckillOutboxIT.java",
+      "purpose": "隔离数据库、故障注入与探针",
+      "sha256": "5e585c1fcb9b34d863151547cf7e1a70eed5afcb181c6c040c617517895cb3b1",
+      "line_count": 590
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-core-service/src/main/java/org/javaup/service/impl/VoucherOrderServiceImpl.java",
+      "purpose": "doSeckillVoucherV2 / createVoucherOrderV2",
+      "sha256": "fb1193c7e7da8ad86003133e9377598443ddfb1fd0aa5366a14fb811e0c084d5",
+      "line_count": 887
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-core-service/src/main/java/org/javaup/kafka/producer/SeckillVoucherProducer.java",
+      "purpose": "afterSendFailure",
+      "sha256": "78b17e96820cb1bcc5524c787556916e23c10887e2e036659b03d67544b12394",
+      "line_count": 48
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-core-service/src/main/java/org/javaup/kafka/consumer/SeckillVoucherConsumer.java",
+      "purpose": "beforeConsume / doConsume / afterConsumeFailure",
+      "sha256": "a189f55e330a8eb2fe9f7e433360efa246d92a6be48d7474a4ca0ba224242c86",
+      "line_count": 256
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-core-service/src/main/resources/lua/seckillVoucher.lua",
+      "purpose": "库存预扣与 Redis Hash 流水",
+      "sha256": "d4549e6a745fcb565752afd178085addabeefb09d360b139305f01f964bf588a",
+      "line_count": 60
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-core-service/src/main/resources/lua/seckillVoucherRollBack.lua",
+      "purpose": "删除库存键及按标志删除用户资格",
+      "sha256": "c1d7536aa84f19348206c77c4ae0b7198723f353f98fa57f13d10396adf0fe17",
+      "line_count": 37
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-mq-framework/hmdp-mq-producer-framework/src/main/java/org/javaup/AbstractProducerHandler.java",
+      "purpose": "CompletableFuture 发送回调",
+      "sha256": "b89a3434bd0e562a3938c70ee7d1946c01f05b3794babbac4b77ef0aef78838c",
+      "line_count": 128
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-core-service/src/main/java/org/javaup/service/impl/ReconciliationTaskServiceImpl.java",
+      "purpose": "对账逻辑",
+      "sha256": "0871dd3d31104a9150bded80d9c5226d1a265663bc39ec04323bc19dd9a123c4",
+      "line_count": 232
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "hmdp-core-service/src/main/java/org/javaup/controller/VoucherOrderController.java",
+      "purpose": "手动对账入口",
+      "sha256": "ca759a8f744e6b50e383ea1d445b5f16da247e2728e161c02a1f388bbffb4bdc",
+      "line_count": 87
+    },
+    {
+      "repository": "hmdp-plus",
+      "path": "README.md",
+      "purpose": "Outbox 文字描述，不作活跃调用链证明",
+      "sha256": "eef5c0354a3cd0d0eaf4aff13267afb8ce4b47c741020b09206b384899d83037",
+      "line_count": 308
+    }
+  ]
+}

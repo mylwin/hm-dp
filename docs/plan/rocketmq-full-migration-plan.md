@@ -5,6 +5,8 @@
 > 下文的全站阶段和工期保留为历史规划，不代表当前执行顺序；当前按客户端接入、可靠受理与 Outbox、
 > 幂等建单与结果查询、补偿对账、故障验收与切换五个阶段推进。
 > 第一阶段已完成，见 [订单 RocketMQ 第一阶段说明](../optimization/order/ROCKETMQ_PHASE1.md)；
+> 第二阶段已完成可靠受理、预占与 Outbox 的隔离验证，见 [第二阶段说明](../optimization/order/ROCKETMQ_PHASE2.md)，
+> 新组件默认关闭，尚未切换 HTTP 入口或注册正式订单消费者；
 > 后续可靠性协议以 [秒杀专项设计](rocketmq-seckill-design.md) 为准。
 
 > 范围：把 `hm-dp` 里所有"异步/事件"场景统一到 RocketMQ。

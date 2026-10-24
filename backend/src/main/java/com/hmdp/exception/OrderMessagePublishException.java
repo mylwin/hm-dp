@@ -1,4 +1,4 @@
-package com.hmdp.infrastructure.mq;
+package com.hmdp.exception;
 
 /**
  * 发送没有得到成功确认；调用方应保留待发记录，不能据此回补库存。

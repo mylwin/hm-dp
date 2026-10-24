@@ -39,6 +39,10 @@ spring:
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:20041223}
+      # 受理事务持有请求行锁时调用 Redis，限制连接与单次命令等待时间。
+      connect-timeout: 2s
+      # 旧 Stream 使用 BLOCK 2000ms，命令超时需留出余量，避免空闲读取被误判为故障。
+      timeout: 3s
       lettuce:
         pool:
           max-active: 10
@@ -72,6 +76,16 @@ hmdp:
     vip-channel-enabled: ${ROCKETMQ_VIP_CHANNEL_ENABLED:false}  # 是否启用VIP通道
     access-key: ${ROCKETMQ_ACCESS_KEY:}  # 访问密钥
     secret-key: ${ROCKETMQ_SECRET_KEY:}  # 密钥
+    outbox:
+      # 第二阶段默认关闭，不扫描尚未执行迁移的业务库。
+      enabled: ${ORDER_OUTBOX_ENABLED:false}  # 是否开启 outbox
+      batch-size: ${ORDER_OUTBOX_BATCH_SIZE:20}  # 批量处理大小
+      poll-interval-ms: ${ORDER_OUTBOX_POLL_INTERVAL_MS:1000}  # 轮询间隔
+      lease-ms: ${ORDER_OUTBOX_LEASE_MS:30000}  # 租约时间
+  seckill:
+    # 只注册新受理组件；当前 HTTP 入口仍走旧 Stream，不提供通道切换。
+    reliable-components-enabled: ${SECKILL_RELIABLE_COMPONENTS_ENABLED:false}  # 是否开启可靠组件
+    transaction-timeout-seconds: ${SECKILL_TRANSACTION_TIMEOUT_SECONDS:5}  # 事务超时秒数
   cache:
     # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。
     max-concurrent-fallbacks: ${CACHE_MAX_CONCURRENT_FALLBACKS:10}

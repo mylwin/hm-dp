@@ -2,6 +2,7 @@ package com.hmdp.infrastructure.mq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.config.RocketMqProperties;
+import com.hmdp.exception.OrderMessagePublishException;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.client.producer.SendResult;
 import org.apache.rocketmq.client.producer.SendStatus;
