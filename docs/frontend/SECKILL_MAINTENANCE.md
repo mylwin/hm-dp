@@ -159,6 +159,16 @@ npx playwright test --config=playwright.maintenance.config.ts
 网络超时/业务拒绝、令牌不落盘及深浅主题的小屏布局和 axe 检查。
 截图在 `frontend/web/test-results/maintenance/screenshots/seckill-maintenance-*.png`。
 
+2026-10-25 验证结果：
+
+- `VITE_SECKILL_OPS_ENABLED=true npm run build` 通过；生产产物无维护页面 JS/CSS 分包。
+- 独立维护页浏览器测试 16 项通过，包含生产预览拒绝直接路由、401 清理工作区及深浅主题 axe 检查。
+- `npx playwright test --config=playwright.seckill.config.ts` 的现有商城/抢购用例中，12 项直接通过；
+  另外两项遇到 trace 临时文件丢失，使用独立产物目录重跑后通过，14 个用例均已验证。
+  重跑命令在 `frontend/web/` 执行：
+  `npx playwright test --config=playwright.seckill.config.ts --grep '三个页面在四种宽度|后端错误显示重试入口' --output=/tmp/hmdp-maintenance-regression-20261025`。
+- `git diff --check` 和本文相对链接检查通过；桌面及小屏截图已人工查看。
+
 这些是模拟 HTTP 响应的浏览器契约测试，不是 MySQL、Redis、RocketMQ 的真实联合验收。
 本次没有向真实后端重投、关闭或处置隔离消息；真实验证时须使用专门的测试券和请求，
 按第四阶段文档检查最终账本、Outbox、预占状态及审计记录。
