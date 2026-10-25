@@ -15,6 +15,10 @@
 - [订单 RocketMQ 第二阶段图解与复盘：参考来源、架构、表职责、Redis 键值示例与故障恢复](optimization/order/ROCKETMQ_PHASE2_REVIEW.md)
 - [订单 RocketMQ 第二阶段：数据设定、事务级别与并发边界](optimization/order/ROCKETMQ_PHASE2_TRANSACTIONS.md)
 - [订单 RocketMQ 第三阶段：幂等建单、结果查询与真实前后端联调（含 PREPARING 停留定位）](optimization/order/ROCKETMQ_PHASE3.md)
+- [订单 RocketMQ 第四阶段第 1 步：新秒杀券自动发布与原券初始化重试](optimization/order/ROCKETMQ_PHASE4_1.md)
+- [订单 RocketMQ 第四阶段：自动发布、预占补偿、请求恢复、死信隔离与联合验收](optimization/order/ROCKETMQ_PHASE4.md)
+- [订单 RocketMQ 第四阶段流程图解：16 个独立 Mermaid 流程](optimization/order/ROCKETMQ_PHASE4_FLOWS.md)
+- [订单 RocketMQ 第四阶段新增 Lua：初始化、确认释放和预占核对 Mermaid 图](optimization/order/ROCKETMQ_PHASE4_LUA_FLOWS.md)
 - [创建测试券并从购买验证 MQ 建单（含 SQL、Redis 初始化及 HTTP 请求）](optimization/order/ROCKETMQ_PURCHASE_TEST.md)
 
 ### 缓存优化

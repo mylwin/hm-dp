@@ -3,6 +3,7 @@ package com.hmdp.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.infrastructure.mq.RocketMqOrderPublisher;
 import com.hmdp.infrastructure.mq.RocketMqOrderListener;
+import com.hmdp.infrastructure.mq.RocketMqDeadLetterListener;
 import com.hmdp.service.ISeckillOrderService;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.acl.common.AclClientRPCHook;
@@ -35,6 +36,34 @@ class RocketMqConfigurationTest {
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
                     classes = {RocketMqProperties.class, RocketMqOrderPublisher.class}))
     static class TestConfiguration {
+    }
+
+    /**
+     * 死信消费者订阅原建单组的系统死信 Topic，使用独立组并随上下文关闭。
+     * @throws Exception 客户端订阅测试失败
+     */
+    @Test
+    void deadLetterConsumerUsesDedicatedGroupAndLifecycle() throws Exception {
+        RocketMqDeadLetterListener listener = mock(RocketMqDeadLetterListener.class);
+        AtomicReference<DefaultMQPushConsumer> observed = new AtomicReference<>();
+        try (var producer = mockConstruction(DefaultMQProducer.class);
+             var consumers = mockConstruction(DefaultMQPushConsumer.class)) {
+            runner.withBean(OrderConsumerProperties.class, OrderConsumerProperties::new)
+                    .withBean(ISeckillOrderService.class, () -> mock(ISeckillOrderService.class))
+                    .withBean(RocketMqOrderListener.class, () -> mock(RocketMqOrderListener.class))
+                    .withBean(RocketMqDeadLetterListener.class, () -> listener)
+                    .withPropertyValues("hmdp.rocketmq.enabled=true", "hmdp.rocketmq.consumer.enabled=true",
+                            "hmdp.rocketmq.consumer.dead-letter-enabled=true", "hmdp.seckill.reliable-components-enabled=true")
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        observed.set(context.getBean("rocketMqDeadLetterConsumer", DefaultMQPushConsumer.class));
+                        verify(observed.get()).subscribe("%DLQ%hmdp-seckill-order-create-cg", "*");
+                        verify(observed.get()).registerMessageListener(listener);
+                        verify(observed.get()).setMaxReconsumeTimes(Integer.MAX_VALUE);
+                        verify(observed.get()).start();
+                    });
+            verify(observed.get()).shutdown();
+        }
     }
 
     /**

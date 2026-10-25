@@ -12,6 +12,7 @@ import com.hmdp.entity.MqOutbox;
 import com.hmdp.entity.SeckillCampaignControl;
 import com.hmdp.entity.SeckillRequest;
 import com.hmdp.exception.SeckillAcceptancePendingException;
+import com.hmdp.exception.SeckillConsistencyException;
 import com.hmdp.infrastructure.mq.SeckillOrderMessage;
 import com.hmdp.infrastructure.redis.RedisIdGenerator;
 import com.hmdp.infrastructure.seckill.SeckillReservationStore;
@@ -197,7 +198,7 @@ public class SeckillRequestServiceImpl implements ISeckillRequestService {
         // 如果预占结果是 NOT_READY、TERMINAL 或 CONFLICT 则抛出异常
         if (reserved == SeckillReservationResult.NOT_READY || reserved == SeckillReservationResult.TERMINAL
                 || reserved == SeckillReservationResult.CONFLICT) {
-            throw new IllegalStateException("预占与请求账本不一致，需恢复任务核对");
+            throw new SeckillConsistencyException("预占与请求账本不一致，需恢复任务核对");
         }
         // 如果预占结果不是 RESERVED 则标记请求账本为 REJECTED 并返回结果
         if (reserved != SeckillReservationResult.RESERVED) {

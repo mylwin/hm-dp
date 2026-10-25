@@ -87,11 +87,24 @@ hmdp:
       group: ${ORDER_CONSUMER_GROUP:hmdp-seckill-order-create-cg}
       threads: ${ORDER_CONSUMER_THREADS:4}
       max-reconsume-times: ${ORDER_CONSUMER_MAX_RECONSUME_TIMES:16}
+      dead-letter-enabled: ${ORDER_DEAD_LETTER_ENABLED:true} # 当前组死信持久化隔离
+      dead-letter-group: ${ORDER_DEAD_LETTER_GROUP:hmdp-seckill-order-dlq-cg}
   seckill:
     # 新组件和独立接口用于联调；原秒杀 HTTP 入口仍走旧 Stream。
     reliable-components-enabled: ${SECKILL_RELIABLE_COMPONENTS_ENABLED:true}  # 是否开启可靠组件
     reliable-api-enabled: ${SECKILL_RELIABLE_API_ENABLED:true} # 独立联调接口，不切换旧入口
     transaction-timeout-seconds: ${SECKILL_TRANSACTION_TIMEOUT_SECONDS:5}  # 事务超时秒数
+    maintenance:
+      enabled: ${SECKILL_MAINTENANCE_ENABLED:true} # 启用前先执行第四阶段两份迁移
+      operations-enabled: ${SECKILL_OPERATIONS_ENABLED:false}
+      operations-token: ${SECKILL_OPERATIONS_TOKEN:}
+      batch-size: ${SECKILL_MAINTENANCE_BATCH_SIZE:20}
+      poll-interval-ms: ${SECKILL_MAINTENANCE_INTERVAL_MS:5000}
+      stale-seconds: ${SECKILL_RECOVERY_STALE_SECONDS:60}
+      recovery-retry-seconds: ${SECKILL_RECOVERY_RETRY_SECONDS:60}
+      lease-ms: ${SECKILL_MAINTENANCE_LEASE_MS:30000}
+      alert-age-seconds: ${SECKILL_ALERT_AGE_SECONDS:120}
+      alert-attempts: ${SECKILL_ALERT_ATTEMPTS:10}
   cache:
     # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。
     max-concurrent-fallbacks: ${CACHE_MAX_CONCURRENT_FALLBACKS:10}

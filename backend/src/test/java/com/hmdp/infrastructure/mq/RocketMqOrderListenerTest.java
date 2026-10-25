@@ -16,7 +16,8 @@ import static org.mockito.Mockito.*;
 class RocketMqOrderListenerTest {
     private final ObjectMapper json = new ObjectMapper().findAndRegisterModules();
     private final ISeckillOrderService orders = mock(ISeckillOrderService.class);
-    private final RocketMqOrderListener listener = new RocketMqOrderListener(json, orders);
+    private final OrderMessageFailureStore failures = mock(OrderMessageFailureStore.class);
+    private final RocketMqOrderListener listener = new RocketMqOrderListener(json, orders, failures);
 
     /**
      * 仅在业务方法返回后确认，业务提交异常要求重试。
@@ -30,10 +31,13 @@ class RocketMqOrderListenerTest {
         assertThat(listener.consumeMessage(List.of(message), null)).isEqualTo(ConsumeConcurrentlyStatus.RECONSUME_LATER);
     }
 
-    /** 非法消息不得静默确认或进入建单服务。 */
+    /** 非法消息提交隔离后才确认，隔离失败则要求重试。 */
     @Test
-    void malformedMessageIsRetried() {
+    void malformedMessageIsQuarantinedBeforeAcknowledging() {
         MessageExt invalid = new MessageExt(); invalid.setTags("CREATE_ORDER"); invalid.setBody("{}".getBytes());
+        assertThat(listener.consumeMessage(List.of(invalid), null)).isEqualTo(ConsumeConcurrentlyStatus.CONSUME_SUCCESS);
+        verify(failures).record(eq(invalid), eq("INVALID"), anyString());
+        doThrow(new IllegalStateException("storage failed")).when(failures).record(any(), anyString(), anyString());
         assertThat(listener.consumeMessage(List.of(invalid), null)).isEqualTo(ConsumeConcurrentlyStatus.RECONSUME_LATER);
         verifyNoInteractions(orders);
     }

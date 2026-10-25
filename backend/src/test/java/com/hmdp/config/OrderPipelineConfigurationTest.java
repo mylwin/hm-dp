@@ -3,6 +3,11 @@ package com.hmdp.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.infrastructure.mq.OrderOutboxDispatcher;
 import com.hmdp.infrastructure.mq.OrderOutboxJob;
+import com.hmdp.infrastructure.mq.OrderMessageFailureStore;
+import com.hmdp.infrastructure.mq.RocketMqDeadLetterListener;
+import com.hmdp.infrastructure.seckill.SeckillMaintenanceJob;
+import com.hmdp.controller.SeckillMaintenanceController;
+import com.hmdp.service.ISeckillMaintenanceService;
 import com.hmdp.infrastructure.mq.RocketMqOrderPublisher;
 import com.hmdp.infrastructure.mq.RocketMqOrderListener;
 import com.hmdp.service.ISeckillOrderService;
@@ -12,8 +17,12 @@ import com.hmdp.infrastructure.seckill.SeckillReservationStore;
 import com.hmdp.mapper.MqOutboxMapper;
 import com.hmdp.mapper.SeckillCampaignControlMapper;
 import com.hmdp.mapper.SeckillRequestMapper;
+import com.hmdp.mapper.VoucherMapper;
+import com.hmdp.service.ISeckillVoucherService;
+import com.hmdp.service.IVoucherService;
 import com.hmdp.service.ISeckillRequestService;
 import com.hmdp.service.impl.SeckillRequestServiceImpl;
+import com.hmdp.service.impl.VoucherServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
@@ -32,6 +41,8 @@ class OrderPipelineConfigurationTest {
             .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
             .withUserConfiguration(PipelineConfiguration.class)
             .withBean(SeckillRequestMapper.class, () -> mock(SeckillRequestMapper.class))
+            .withBean(VoucherMapper.class, () -> mock(VoucherMapper.class))
+            .withBean(ISeckillVoucherService.class, () -> mock(ISeckillVoucherService.class))
             .withBean(SeckillCampaignControlMapper.class, () -> mock(SeckillCampaignControlMapper.class))
             .withBean(MqOutboxMapper.class, () -> mock(MqOutboxMapper.class))
             .withBean(RedisIdGenerator.class, () -> mock(RedisIdGenerator.class))
@@ -39,12 +50,16 @@ class OrderPipelineConfigurationTest {
             .withBean(PlatformTransactionManager.class, () -> mock(PlatformTransactionManager.class))
             .withBean(RocketMqOrderPublisher.class, () -> mock(RocketMqOrderPublisher.class))
             .withBean(ISeckillOrderService.class, () -> mock(ISeckillOrderService.class))
+            .withBean(OrderMessageFailureStore.class, () -> mock(OrderMessageFailureStore.class))
+            .withBean(ISeckillMaintenanceService.class, () -> mock(ISeckillMaintenanceService.class))
             .withBean(ObjectMapper.class, () -> new ObjectMapper().findAndRegisterModules());
 
     @Configuration(proxyBeanMethods = false)
     @Import({SeckillOrderProperties.class, OrderOutboxProperties.class, SeckillRequestServiceImpl.class,
             SeckillReservationStore.class, OrderOutboxDispatcher.class, OrderOutboxJob.class,
-            RocketMqOrderListener.class, SeckillRequestController.class})
+            RocketMqOrderListener.class, SeckillRequestController.class, VoucherServiceImpl.class,
+            SeckillMaintenanceProperties.class, SeckillMaintenanceJob.class, SeckillMaintenanceController.class,
+            RocketMqDeadLetterListener.class})
     static class PipelineConfiguration {
     }
 
@@ -53,11 +68,15 @@ class OrderPipelineConfigurationTest {
     void disabledByDefaultDoesNotRegisterNewPipeline() {
         runner.run(context -> {
             assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(IVoucherService.class);
             assertThat(context).doesNotHaveBean(ISeckillRequestService.class);
             assertThat(context).doesNotHaveBean(OrderOutboxDispatcher.class);
             assertThat(context).doesNotHaveBean(OrderOutboxJob.class);
             assertThat(context).doesNotHaveBean(RocketMqOrderListener.class);
             assertThat(context).doesNotHaveBean(SeckillRequestController.class);
+            assertThat(context).doesNotHaveBean(SeckillMaintenanceJob.class);
+            assertThat(context).doesNotHaveBean(SeckillMaintenanceController.class);
+            assertThat(context).doesNotHaveBean(RocketMqDeadLetterListener.class);
         });
     }
 
@@ -102,6 +121,28 @@ class OrderPipelineConfigurationTest {
             assertThat(context).hasNotFailed();
             assertThat(context).doesNotHaveBean(OrderOutboxDispatcher.class);
             assertThat(context).doesNotHaveBean(OrderOutboxJob.class);
+        });
+    }
+
+    /** 维护可独立运行，运维接口及死信消费者仍需各自开关。 */
+    @Test
+    void maintenanceAndOperationsHaveIndependentSwitches() {
+        runner.withPropertyValues("hmdp.seckill.reliable-components-enabled=true",
+                "hmdp.seckill.maintenance.enabled=true").run(context -> {
+            assertThat(context).hasNotFailed().hasSingleBean(SeckillMaintenanceJob.class);
+            assertThat(context).doesNotHaveBean(SeckillMaintenanceController.class);
+            assertThat(context).doesNotHaveBean(RocketMqDeadLetterListener.class);
+        });
+        runner.withPropertyValues("hmdp.seckill.reliable-components-enabled=true",
+                "hmdp.seckill.maintenance.operations-enabled=true",
+                "hmdp.seckill.maintenance.operations-token=test-token-at-least-32-characters-long").run(context -> {
+            assertThat(context).hasNotFailed().hasSingleBean(SeckillMaintenanceController.class);
+        });
+        runner.withPropertyValues("hmdp.seckill.maintenance.enabled=true",
+                "hmdp.seckill.maintenance.operations-enabled=true").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).doesNotHaveBean(SeckillMaintenanceJob.class);
+            assertThat(context).doesNotHaveBean(SeckillMaintenanceController.class);
         });
     }
 }

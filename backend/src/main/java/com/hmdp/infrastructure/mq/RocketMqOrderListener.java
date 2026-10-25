@@ -27,13 +27,16 @@ import java.util.List;
 public class RocketMqOrderListener implements MessageListenerConcurrently {
     private final ObjectMapper objectMapper;
     private final ISeckillOrderService orders;
+    private final OrderMessageFailureStore failures;
 
     /**
-     * 处理整批消息，任何一条未完成则重试；已提交部分由业务幂等保护。
+     * 逐条校验建单消息：合法消息交给原幂等建单事务，非法协议消息先保存隔离记录。
+     * 订单业务事务或隔离事务返回后才视为当前消息处理完成；业务异常、隔离失败或线程中断均要求 Broker 重试。
+     * 已完成部分可被再次投递，由原订单号及隔离编号保证不会重复建单或丢失排查记录。
      *
-     * @param messages 本轮消息，客户端配置每批一条
-     * @param context  MQ 消费上下文
-     * @return 全部提交后成功，否则稍后重试
+     * @param messages 当前消费批次，客户端配置每批一条；方法仍逐条检查整个列表
+     * @param context RocketMQ 消费上下文，本方法不修改重试策略
+     * @return 全批已完成建单或可靠隔离时为 CONSUME_SUCCESS；任一条未确认完成时为 RECONSUME_LATER
      */
     @Override
     public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> messages, ConsumeConcurrentlyContext context) {
@@ -43,24 +46,34 @@ public class RocketMqOrderListener implements MessageListenerConcurrently {
             if (Thread.currentThread().isInterrupted()) {
                 return ConsumeConcurrentlyStatus.RECONSUME_LATER;
             }
+            SeckillOrderMessage order;
             try {
-                // 如果消息标签或大小非法，则稍后重试
+                // 标签或大小错误先交下方隔离；隔离提交后可确认，隔离失败才要求 Broker 重试。
                 if (!"CREATE_ORDER".equals(message.getTags()) || message.getBody() == null
                         || message.getBody().length > 65536) {
                     throw new IllegalArgumentException("建单消息标签或大小非法");
                 }
                 // 解析建单消息
-                SeckillOrderMessage order = objectMapper.readValue(message.getBody(), SeckillOrderMessage.class);
-                // 创建订单
-                orders.createFromMessage(order);
+                order = objectMapper.readValue(message.getBody(), SeckillOrderMessage.class);
+                if (order == null) {
+                    throw new IllegalArgumentException("订单消息不能为空");
+                }
             } catch (IOException | IllegalArgumentException ex) {
-                // 暂不丢弃非法消息，超过重试上限进入 Broker 死信，隔离治理在第四阶段完善。
-                log.warn("订单消息校验未通过，msgId={}，reconsumeTimes={}，errorType={}",
-                        message.getMsgId(), message.getReconsumeTimes(), ex.getClass().getSimpleName());
-                return ConsumeConcurrentlyStatus.RECONSUME_LATER;
+                // 非法协议消息提交隔离记录后可确认，不让毒消息无限重试；存储失败则重试。
+                try {
+                    failures.record(message, "INVALID", ex.getClass().getSimpleName());
+                    continue;
+                } catch (RuntimeException storageFailure) {
+                    log.warn("非法消息隔离未提交，msgId={} errorType={}", message.getMsgId(), storageFailure.getClass().getSimpleName());
+                    return ConsumeConcurrentlyStatus.RECONSUME_LATER;
+                }
+            }
+            try {
+                // 业务身份冲突不当作解析错误确认，继续交 Broker 重试及死信隔离。
+                orders.createFromMessage(order);
             } catch (RuntimeException ex) {
-                log.debug("订单消息等待重试，msgId={}，reconsumeTimes={}，errorType={}",
-                        message.getMsgId(), message.getReconsumeTimes(), ex.getClass().getSimpleName());
+                log.warn("SECKILL_CONSUME_RETRY msgId={} orderId={} reconsumeTimes={} errorType={}",
+                        message.getMsgId(), order.orderId(), message.getReconsumeTimes(), ex.getClass().getSimpleName());
                 return ConsumeConcurrentlyStatus.RECONSUME_LATER;
             }
         }

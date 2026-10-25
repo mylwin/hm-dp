@@ -3,6 +3,7 @@ package com.hmdp.config;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import com.hmdp.infrastructure.mq.RocketMqOrderListener;
+import com.hmdp.infrastructure.mq.RocketMqDeadLetterListener;
 import com.hmdp.service.ISeckillOrderService;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.client.exception.MQClientException;
@@ -88,6 +89,35 @@ public class RocketMqConfiguration {
         consumer.registerMessageListener(listener);
         log.debug("RocketMQ 订单消费者配置完成，group={}，topic={}",
                 consumerProperties.getGroup(), properties.getOrderTopic());
+        return consumer;
+    }
+
+    /**
+     * 订阅原建单消费组的死信，使用独立消费组，隔离持久化后才确认。
+     * @param consumerProperties 原建单及死信配置
+     * @param listener 持久化死信监听器
+     * @return Spring 管理启停的死信消费者
+     * @throws MQClientException 订阅配置失败
+     */
+    @Bean(initMethod = "start", destroyMethod = "shutdown")
+    @ConditionalOnProperty(prefix = "hmdp", name = {"rocketmq.enabled", "rocketmq.consumer.enabled",
+            "rocketmq.consumer.dead-letter-enabled", "seckill.reliable-components-enabled"}, havingValue = "true")
+    public DefaultMQPushConsumer rocketMqDeadLetterConsumer(OrderConsumerProperties consumerProperties,
+                                                          RocketMqDeadLetterListener listener) throws MQClientException {
+        properties.validate(); consumerProperties.validate();
+        RPCHook hook = StringUtils.hasText(properties.getAccessKey())
+                ? new AclClientRPCHook(new SessionCredentials(properties.getAccessKey(), properties.getSecretKey())) : null;
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer(consumerProperties.getDeadLetterGroup(), hook);
+        consumer.setNamesrvAddr(properties.getNameServer());
+        consumer.setVipChannelEnabled(properties.isVipChannelEnabled());
+        consumer.setMessageModel(MessageModel.CLUSTERING);
+        consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
+        consumer.setConsumeThreadMin(1); consumer.setConsumeThreadMax(1);
+        consumer.setConsumeMessageBatchMaxSize(1);
+        // 隔离库暂不可用时不让观察者自己的重试耗尽，再次遗失处置入口。
+        consumer.setMaxReconsumeTimes(Integer.MAX_VALUE);
+        consumer.subscribe("%DLQ%" + consumerProperties.getGroup(), "*");
+        consumer.registerMessageListener(listener);
         return consumer;
     }
 

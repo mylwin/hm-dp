@@ -16,11 +16,20 @@ import com.hmdp.infrastructure.seckill.SeckillReservationStore;
 import com.hmdp.mapper.MqOutboxMapper;
 import com.hmdp.mapper.SeckillCampaignControlMapper;
 import com.hmdp.mapper.SeckillRequestMapper;
+import com.hmdp.mapper.SeckillMaintenanceMapper;
+import com.hmdp.config.SeckillMaintenanceProperties;
+import com.hmdp.service.impl.SeckillMaintenanceServiceImpl;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.mapper.VoucherMapper;
 import com.hmdp.mapper.SeckillVoucherMapper;
 import com.hmdp.service.impl.SeckillOrderServiceImpl;
 import com.hmdp.service.impl.SeckillRequestServiceImpl;
+import com.hmdp.service.impl.VoucherServiceImpl;
+import com.hmdp.service.impl.SeckillVoucherServiceImpl;
+import com.hmdp.entity.Voucher;
+import com.hmdp.exception.SeckillCampaignPublicationPendingException;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.rocketmq.acl.common.AclClientRPCHook;
 import org.apache.rocketmq.acl.common.SessionCredentials;
@@ -31,7 +40,6 @@ import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.mybatis.spring.SqlSessionFactoryBean;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.RedisSystemException;
@@ -49,11 +57,15 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.util.StringUtils;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
@@ -83,6 +95,7 @@ class SeckillOutboxIT {
     private SeckillRequestMapper requests;
     private SeckillCampaignControlMapper campaigns;
     private MqOutboxMapper outbox;
+    private SeckillMaintenanceMapper maintenanceMapper;
     private VoucherOrderMapper orders;
     private VoucherMapper shopVouchers;
     private SeckillVoucherMapper vouchers;
@@ -118,21 +131,28 @@ class SeckillOutboxIT {
                 "db/migration/V20261024_02__seckill_request_outbox.sql"));
         migration.execute(dataSource);
         migration.execute(dataSource); // 同一脚本重复执行不得清空或破坏已有表。
+        ResourceDatabasePopulator publication = new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20261025_04__seckill_campaign_publication.sql"));
+        publication.execute(dataSource);
+        publication.execute(dataSource);
+        ResourceDatabasePopulator maintenanceMigration = new ResourceDatabasePopulator(new ClassPathResource("db/migration/V20261025_05__seckill_maintenance.sql"));
+        maintenanceMigration.execute(dataSource); maintenanceMigration.execute(dataSource);
         new ResourceDatabasePopulator(new ClassPathResource("db/seckill-order-tables.sql")).execute(dataSource);
         ResourceDatabasePopulator orderIndex = new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20261024_03__seckill_order_unique.sql"));
         orderIndex.execute(dataSource);
         orderIndex.execute(dataSource);
         manager = new DataSourceTransactionManager(dataSource);
-        org.apache.ibatis.session.Configuration configuration = new org.apache.ibatis.session.Configuration();
+        MybatisConfiguration configuration = new MybatisConfiguration();
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.addMapper(SeckillRequestMapper.class);
         configuration.addMapper(SeckillCampaignControlMapper.class);
         configuration.addMapper(MqOutboxMapper.class);
+        configuration.addMapper(SeckillMaintenanceMapper.class);
         configuration.addMapper(VoucherOrderMapper.class);
         configuration.addMapper(VoucherMapper.class);
         configuration.addMapper(SeckillVoucherMapper.class);
-        SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
+        MybatisSqlSessionFactoryBean factory = new MybatisSqlSessionFactoryBean();
         factory.setDataSource(dataSource);
         factory.setConfiguration(configuration);
         factory.setMapperLocations(new ClassPathResource("mapper/VoucherMapper.xml"));
@@ -141,6 +161,7 @@ class SeckillOutboxIT {
         requests = template.getMapper(SeckillRequestMapper.class);
         campaigns = template.getMapper(SeckillCampaignControlMapper.class);
         outbox = template.getMapper(MqOutboxMapper.class);
+        maintenanceMapper = template.getMapper(SeckillMaintenanceMapper.class);
         orders = template.getMapper(VoucherOrderMapper.class);
         shopVouchers = template.getMapper(VoucherMapper.class);
         vouchers = template.getMapper(SeckillVoucherMapper.class);
@@ -185,6 +206,9 @@ class SeckillOutboxIT {
             }
             redis.delete(redisKeys);
             redisKeys.clear();
+            jdbc.update("DELETE FROM tb_seckill_maintenance_audit");
+            jdbc.update("DELETE FROM tb_seckill_recovery_attempt");
+            jdbc.update("DELETE FROM tb_seckill_message_quarantine");
             jdbc.update("DELETE FROM tb_mq_outbox");
             jdbc.update("DELETE FROM tb_seckill_request");
             jdbc.update("DELETE FROM tb_seckill_campaign_control");
@@ -226,6 +250,225 @@ class SeckillOutboxIT {
         assertThat(jdbc.queryForObject("SELECT payload FROM tb_mq_outbox", String.class)).contains("trace-first");
         assertThatThrownBy(() -> service.accept(1L, voucherId + 1, "request-1", "trace"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** 新券自动发布后能直接受理，重复初始化不覆盖已预占库存。 */
+    @Test
+    void autoPublishesNewVoucherAndPreservesReservedStock() {
+        VoucherServiceImpl publisher = voucherService(store, campaigns);
+        Voucher voucher = newVoucher();
+        publisher.addSeckillVoucher(voucher);
+        List<String> keys = trackCampaign(voucher.getId());
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("READY");
+        assertThat(jdbc.queryForObject("SELECT publication_status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("PUBLISHED");
+        assertThat(redis.hasKey("hmdp:seckill:stock:" + voucher.getId())).isFalse();
+        SeckillAcceptance accepted = service(outbox, store).accept(51L, voucher.getId(), "auto-publish", "trace-auto");
+        redisKeys.addAll(SeckillReservationStore.keys(voucher.getId(), accepted.orderId()));
+        assertThat(accepted.status()).isEqualTo(SeckillRequestStatus.ACCEPTED);
+        publisher.initializeSeckillCampaign(voucher.getId());
+        assertThat(redis.opsForValue().get(keys.get(0))).isEqualTo("9");
+    }
+
+    /** Redis 已执行但响应丢失时活动仍暂停，重试沿用原券及已有键完成发布。 */
+    @Test
+    void lostInitializationReplyCanRetryOriginalVoucher() {
+        SeckillReservationStore lostReply = spy(store);
+        doAnswer(call -> { call.callRealMethod(); throw new IllegalStateException("lost reply"); })
+                .when(lostReply).initializeCampaign(any(), any(), any(), any(), any(), anyBoolean());
+        Voucher voucher = newVoucher();
+        assertThatThrownBy(() -> voucherService(lostReply, campaigns).addSeckillVoucher(voucher))
+                .isInstanceOf(SeckillCampaignPublicationPendingException.class);
+        List<String> keys = trackCampaign(voucher.getId());
+        assertThat(redis.opsForValue().get(keys.get(0))).isEqualTo("10");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("PAUSED");
+        voucherService(store, campaigns).initializeSeckillCampaign(voucher.getId());
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("READY");
+    }
+
+    /** READY 更新后事务提交前失败必须回滚，Redis 已写入可供下一次核对。 */
+    @Test
+    void readinessRollbackDoesNotLosePendingCampaign() {
+        SeckillCampaignControlMapper failing = mock(SeckillCampaignControlMapper.class, delegatesTo(campaigns));
+        doAnswer(call -> {
+            campaigns.markReady(call.getArgument(0), call.getArgument(1));
+            throw new IllegalStateException("failure before commit");
+        }).when(failing).markReady(anyLong(), anyLong());
+        Voucher voucher = newVoucher();
+        assertThatThrownBy(() -> voucherService(store, failing).addSeckillVoucher(voucher))
+                .isInstanceOf(SeckillCampaignPublicationPendingException.class);
+        trackCampaign(voucher.getId());
+        assertThat(jdbc.queryForObject("SELECT publication_status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("PENDING");
+        voucherService(store, campaigns).initializeSeckillCampaign(voucher.getId());
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("READY");
+    }
+
+    /** 已发布活动全部丢键也不得重新灌入数据库库存。 */
+    @Test
+    void publishedMissingKeysAreNeverRecreated() {
+        VoucherServiceImpl publisher = voucherService(store, campaigns);
+        Voucher voucher = newVoucher();
+        publisher.addSeckillVoucher(voucher);
+        List<String> keys = trackCampaign(voucher.getId());
+        redis.delete(keys);
+        assertThatThrownBy(() -> publisher.initializeSeckillCampaign(voucher.getId()))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(redis.hasKey(keys.get(0))).isFalse();
+        assertThat(redis.hasKey(keys.get(1))).isFalse();
+    }
+
+    /** 重复迁移保留新券待发布标记，历史行和已发布后暂停的活动均不接管。 */
+    @Test
+    void migrationPreservesPublicationOwnership() {
+        SeckillReservationStore unavailable = mock(SeckillReservationStore.class);
+        doThrow(new IllegalStateException("unavailable")).when(unavailable)
+                .initializeCampaign(any(), any(), any(), any(), any(), anyBoolean());
+        Voucher voucher = newVoucher();
+        assertThatThrownBy(() -> voucherService(unavailable, campaigns).addSeckillVoucher(voucher))
+                .isInstanceOf(SeckillCampaignPublicationPendingException.class);
+        trackCampaign(voucher.getId());
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20261025_04__seckill_campaign_publication.sql")).execute(dataSource);
+        assertThat(jdbc.queryForObject("SELECT publication_status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT publication_status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucherId)).isEqualTo("UNMANAGED");
+        VoucherServiceImpl publisher = voucherService(store, campaigns);
+        assertThatThrownBy(() -> publisher.initializeSeckillCampaign(voucherId)).isInstanceOf(IllegalStateException.class);
+        publisher.initializeSeckillCampaign(voucher.getId());
+        jdbc.update("UPDATE tb_seckill_campaign_control SET status='PAUSED' WHERE voucher_id=?", voucher.getId());
+        assertThatThrownBy(() -> publisher.initializeSeckillCampaign(voucher.getId())).isInstanceOf(IllegalStateException.class);
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control WHERE voucher_id=?",
+                String.class, voucher.getId())).isEqualTo("PAUSED");
+    }
+
+    /** 零库存活动可正常发布，购买时返回售罄，不产生负库存。 */
+    @Test
+    void zeroStockCampaignPublishesAndRejectsPurchase() {
+        Voucher voucher = newVoucher().setStock(0);
+        voucherService(store, campaigns).addSeckillVoucher(voucher);
+        List<String> keys = trackCampaign(voucher.getId());
+        SeckillAcceptance accepted = service(outbox, store).accept(53L, voucher.getId(), "zero-stock", "trace-zero");
+        redisKeys.addAll(SeckillReservationStore.keys(voucher.getId(), accepted.orderId()));
+        assertThat(accepted.status()).isEqualTo(SeckillRequestStatus.REJECTED);
+        assertThat(redis.opsForValue().get(keys.get(0))).isEqualTo("0");
+    }
+
+    /** 部分键、错误代次、已变化库存及带过期时间的键均保持原样并拒绝开放。 */
+    @Test
+    void conflictingInitializationDoesNotRepairOrOverwrite() {
+        long candidate = sequence.incrementAndGet();
+        List<String> keys = trackCampaign(candidate);
+        LocalDateTime begin = LocalDateTime.now(ZoneOffset.UTC).withNano(0);
+        redis.opsForValue().set(keys.get(0), "7");
+        assertThatThrownBy(() -> store.initializeCampaign(candidate, 1L, 10, begin, begin.plusDays(1), true))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(redis.opsForValue().get(keys.get(0))).isEqualTo("7");
+        assertThat(redis.hasKey(keys.get(1))).isFalse();
+        redis.delete(keys);
+        store.initializeCampaign(candidate, 1L, 10, begin, begin.plusDays(1), true);
+        assertThatThrownBy(() -> store.initializeCampaign(candidate, 2L, 10, begin, begin.plusDays(1), true))
+                .isInstanceOf(IllegalStateException.class);
+        redis.opsForValue().set(keys.get(0), "9");
+        assertThatThrownBy(() -> store.initializeCampaign(candidate, 1L, 10, begin, begin.plusDays(1), true))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(redis.opsForValue().get(keys.get(0))).isEqualTo("9");
+        redis.expire(keys.get(1), Duration.ofHours(1));
+        assertThatThrownBy(() -> store.initializeCampaign(candidate, 1L, 10, begin, begin.plusDays(1), false))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    /** 首次事务失败不留下半张券，也不写入任何活动 Redis 键。 */
+    @Test
+    void initialCreationRollsBackAllDatabaseRows() {
+        SeckillCampaignControlMapper failing = mock(SeckillCampaignControlMapper.class, delegatesTo(campaigns));
+        doThrow(new IllegalStateException("insert failed")).when(failing).insertPending(anyLong());
+        Voucher voucher = newVoucher();
+        assertThatThrownBy(() -> voucherService(store, failing).addSeckillVoucher(voucher))
+                .isInstanceOf(IllegalStateException.class)
+                .isNotInstanceOf(SeckillCampaignPublicationPendingException.class);
+        List<String> keys = trackCampaign(voucher.getId());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_voucher WHERE id=?", Integer.class, voucher.getId())).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_voucher WHERE voucher_id=?", Integer.class, voucher.getId())).isZero();
+        assertThat(redis.hasKey(keys.get(0))).isFalse();
+    }
+
+    /** 发布排他锁阻止另一线程受理和发布；NOWAIT 立即失败，不绕过锁开放。 */
+    @Test
+    void exclusivePublicationLockBlocksOtherWork() {
+        Voucher voucher = newVoucher();
+        VoucherServiceImpl publisher = voucherService(store, campaigns);
+        publisher.addSeckillVoucher(voucher);
+        trackCampaign(voucher.getId());
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            new TransactionTemplate(manager).executeWithoutResult(status -> {
+                campaigns.lockExclusive(voucher.getId());
+                Future<?> competing = pool.submit(() -> {
+                    assertThatThrownBy(() -> publisher.initializeSeckillCampaign(voucher.getId()))
+                            .isInstanceOf(org.springframework.dao.CannotAcquireLockException.class);
+                    assertThatThrownBy(() -> service(outbox, store).accept(52L, voucher.getId(), "locked-init", "trace-lock"))
+                            .isInstanceOf(SeckillAcceptancePendingException.class);
+                });
+                try {
+                    competing.get(5, TimeUnit.SECONDS);
+                } catch (Exception ex) {
+                    throw new IllegalStateException(ex);
+                }
+            });
+        } finally {
+            pool.shutdownNow();
+        }
+        publisher.initializeSeckillCampaign(voucher.getId());
+    }
+
+    /**
+     * 组合真实 MyBatis-Plus 库存服务和现有发券服务，不启动完整应用及旧 Stream 线程。
+     *
+     * @param reservations 本用例使用的真实 Redis 组件或故障替身
+     * @param controls 真实活动 Mapper 或故障替身
+     * @return 使用真实数据库事务的发券服务
+     */
+    private VoucherServiceImpl voucherService(SeckillReservationStore reservations, SeckillCampaignControlMapper controls) {
+        SeckillVoucherServiceImpl stockService = new SeckillVoucherServiceImpl();
+        ReflectionTestUtils.setField(stockService, "baseMapper", vouchers);
+        StaticListableBeanFactory beans = new StaticListableBeanFactory();
+        beans.addBean("reservations", reservations);
+        SeckillOrderProperties properties = new SeckillOrderProperties();
+        properties.setReliableComponentsEnabled(true);
+        VoucherServiceImpl publisher = new VoucherServiceImpl(stockService, redis, controls,
+                beans.getBeanProvider(SeckillReservationStore.class), manager, properties);
+        ReflectionTestUtils.setField(publisher, "baseMapper", shopVouchers);
+        return publisher;
+    }
+
+    /**
+     * 创建窗口覆盖当前时间的独立新券，时间精确到数据库支持的秒。
+     *
+     * @return 尚无编号、库存为十的新券资料
+     */
+    private Voucher newVoucher() {
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC).withNano(0);
+        return new Voucher().setShopId(1L).setTitle("自动发布测试券").setPayValue(5000L)
+                .setActualValue(10000L).setType(1).setStock(10)
+                .setBeginTime(now.minusMinutes(1)).setEndTime(now.plusHours(1));
+    }
+
+    /**
+     * 登记新增活动的 Redis 键以供精确清理，不扫描业务命名空间。
+     *
+     * @param id 本用例创建的券编号
+     * @return 库存、元数据及用户归属三个键
+     */
+    private List<String> trackCampaign(Long id) {
+        List<String> keys = SeckillReservationStore.keys(id, 0L).subList(0, 3);
+        redisKeys.addAll(keys);
+        return keys;
     }
 
     /**
@@ -907,7 +1150,7 @@ class SeckillOutboxIT {
         RocketMqConfiguration configuration = new RocketMqConfiguration(properties);
         DefaultMQProducer producer = configuration.rocketMqProducer();
         SeckillOrderServiceImpl business = orderService(outbox, orders);
-        RocketMqOrderListener listener = new RocketMqOrderListener(json, business);
+        RocketMqOrderListener listener = new RocketMqOrderListener(json, business, new OrderMessageFailureStore(maintenanceMapper, manager));
         com.hmdp.config.OrderConsumerProperties consumerProperties = new com.hmdp.config.OrderConsumerProperties();
         consumerProperties.setGroup("hmdp-phase3-consumer-" + suffix);
         consumerProperties.setThreads(1);
@@ -938,6 +1181,518 @@ class SeckillOutboxIT {
             consumer.shutdown();
             producer.shutdown();
         }
+    }
+
+    /** 成功订单确认任务只改变预占状态，重复执行不重复减库存。 */
+    @Test
+    void confirmationTaskIsIdempotent() {
+        SeckillOrderMessage message = acceptedMessage(1L, "confirm-once");
+        orderService(outbox, orders).createFromMessage(message);
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        assertThat(worker.processReservationTasks()).isEqualTo(1);
+        assertThat(redis.opsForHash().get(SeckillReservationStore.keys(voucherId, message.orderId()).get(3), "state")).isEqualTo("CONFIRMED");
+        jdbc.update("UPDATE tb_mq_outbox SET status='PENDING' WHERE event_type='CONFIRM_RESERVATION'");
+        worker.processReservationTasks();
+        assertThat(stock()).isEqualTo("9");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox WHERE event_type='CONFIRM_RESERVATION'", String.class)).isEqualTo("SENT");
+        assertThatThrownBy(() -> worker.close(message.orderId(), "operator-1", "不能关闭成功订单")).isInstanceOf(IllegalStateException.class);
+    }
+
+    /** 关闭请求先提交释放任务，执行器最多回补一次，旧释放不删除新订单归属。 */
+    @Test
+    void releaseDoesNotDeleteNewPurchaseOwnership() {
+        SeckillOrderMessage message = acceptedMessage(1L, "release-once");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.close(message.orderId(), "operator-1", "隔离测试人工关闭");
+        assertThat(stock()).isEqualTo("9");
+        worker.processReservationTasks();
+        assertThat(stock()).isEqualTo("10");
+        SeckillAcceptance renewed = service(outbox, store).accept(1L, voucherId, "renewed", "trace-renewed");
+        jdbc.update("UPDATE tb_mq_outbox SET status='PENDING' WHERE event_type='RELEASE_RESERVATION'");
+        worker.processReservationTasks();
+        assertThat(stock()).isEqualTo("9");
+        assertThat(redis.opsForHash().get(SeckillReservationStore.keys(voucherId, message.orderId()).get(2), "1")).isEqualTo(renewed.orderId().toString());
+        orderService(outbox, orders).createFromMessage(message);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_voucher_order", Integer.class)).isZero();
+    }
+
+    /** 关闭尚未执行 Redis 的 PREPARING 后写墓碑，迟到预占不得扣库存。 */
+    @Test
+    void preparingClosureFencesLateReservation() {
+        SeckillReservationStore unavailable = mock(SeckillReservationStore.class);
+        doThrow(new IllegalStateException("timeout")).when(unavailable).reserve(any(), any(), any(), any());
+        assertThatThrownBy(() -> service(outbox, unavailable).accept(1L, voucherId, "close-preparing", "trace"))
+                .isInstanceOf(SeckillAcceptancePendingException.class);
+        Long id = requests.findByRequest(1L, "close-preparing").getOrderId();
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.close(id, "operator-1", "核对后明确取消尚未受理请求");
+        worker.processReservationTasks();
+        assertThat(store.reserve(voucherId, 1L, id, 1L)).isEqualTo(SeckillReservationResult.TERMINAL);
+        assertThat(stock()).isEqualTo("10");
+    }
+
+    /** Redis 释放成功但响应丢失时，数据库保留任务；下一轮只确认原结果，不再次回补。 */
+    @Test
+    void lostReleaseReplyRetriesWithoutDoubleIncrement() {
+        SeckillOrderMessage message = acceptedMessage(1L, "lost-release");
+        maintenanceService(store, outbox).close(message.orderId(), "operator-1", "释放响应故障测试");
+        SeckillReservationStore lostReply = spy(store);
+        doAnswer(call -> { call.callRealMethod(); throw new IllegalStateException("lost reply"); }).when(lostReply)
+                .finish(any(), any(), any(), any(), anyBoolean(), anyBoolean());
+        maintenanceService(lostReply, outbox).processReservationTasks();
+        assertThat(stock()).isEqualTo("10");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox WHERE event_type='RELEASE_RESERVATION'", String.class)).isEqualTo("PENDING");
+        jdbc.update("UPDATE tb_mq_outbox SET next_retry_at=UTC_TIMESTAMP(3) WHERE event_type='RELEASE_RESERVATION'");
+        maintenanceService(store, outbox).processReservationTasks();
+        assertThat(stock()).isEqualTo("10");
+    }
+
+    /** 已受理请求的预占丢失不能猜测回补；任务保留并暂停活动留下审计。 */
+    @Test
+    void acceptedMissingReservationPausesInsteadOfGuessing() {
+        SeckillOrderMessage message = acceptedMessage(1L, "missing-release");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.close(message.orderId(), "operator-1", "验证缺失预占保护");
+        redis.delete(SeckillReservationStore.keys(voucherId, message.orderId()).get(3));
+        worker.processReservationTasks();
+        assertThat(stock()).isEqualTo("9");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control", String.class)).isEqualTo("PAUSED");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_maintenance_audit WHERE action='CONSISTENCY_CONFLICT'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox WHERE event_type='RELEASE_RESERVATION'", String.class)).isEqualTo("PENDING");
+    }
+
+    /** 成功订单的确认预占拒绝被任何释放脚本回补。 */
+    @Test
+    void confirmedReservationCannotBeReleased() {
+        SeckillOrderMessage message = acceptedMessage(1L, "confirmed-protection");
+        orderService(outbox, orders).createFromMessage(message);
+        maintenanceService(store, outbox).processReservationTasks();
+        assertThatThrownBy(() -> store.finish(voucherId, 1L, message.orderId(), 1L, false, true))
+                .isInstanceOf(com.hmdp.exception.SeckillConsistencyException.class);
+        assertThat(stock()).isEqualTo("9");
+    }
+
+    /** 错误代次和归属不得确认或回补库存。 */
+    @Test
+    void reservationFinishRejectsEpochAndIdentityMismatch() {
+        SeckillOrderMessage message = acceptedMessage(1L, "identity-protection");
+        assertThatThrownBy(() -> store.finish(voucherId, 1L, message.orderId(), 2L, false, false))
+                .isInstanceOf(com.hmdp.exception.SeckillConsistencyException.class);
+        assertThatThrownBy(() -> store.finish(voucherId, 2L, message.orderId(), 1L, false, false))
+                .isInstanceOf(com.hmdp.exception.SeckillConsistencyException.class);
+        assertThat(stock()).isEqualTo("9");
+    }
+
+    /**
+     * 两个实例并发运行补偿只领取一个有效租约，库存仍只回补一次。
+     * @throws Exception 并发调用失败或超时
+     */
+    @Test
+    void concurrentMaintenanceHasOneEffectiveRelease() throws Exception {
+        SeckillOrderMessage message = acceptedMessage(1L, "concurrent-release");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.close(message.orderId(), "operator-1", "并发领取测试");
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Integer>> results = pool.invokeAll(List.of(worker::processReservationTasks, worker::processReservationTasks));
+            int total = 0;
+            for (Future<Integer> result : results) {
+                total += result.get(5, TimeUnit.SECONDS);
+            }
+            assertThat(total).isEqualTo(1);
+            assertThat(stock()).isEqualTo("10");
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /** Outbox 写失败留下的 PREPARING 由后台沿用原编号恢复，不再次扣库存。 */
+    @Test
+    void recoveryResumesPreparingWithOriginalOrderId() {
+        MqOutboxMapper failing = mock(MqOutboxMapper.class, delegatesTo(outbox));
+        doThrow(new IllegalStateException("outbox unavailable")).when(failing).insertEvent(any());
+        assertThatThrownBy(() -> service(failing, store).accept(1L, voucherId, "background-preparing", "trace-original"))
+                .isInstanceOf(SeckillAcceptancePendingException.class);
+        Long id = requests.findByRequest(1L, "background-preparing").getOrderId();
+        makeRequestsStale();
+        maintenanceService(store, outbox).recoverDue();
+        assertThat(requests.findByRequest(1L, "background-preparing").getOrderId()).isEqualTo(id);
+        assertThat(requests.findByRequest(1L, "background-preparing").getStatus()).isEqualTo(SeckillRequestStatus.ACCEPTED);
+        assertThat(stock()).isEqualTo("9");
+        assertThat(jdbc.queryForObject("SELECT event_id FROM tb_mq_outbox", String.class)).isEqualTo("order-" + id);
+    }
+
+    /** ACCEPTED 的 SENT 记录长期无结果时重投原消息，已有原订单也不再次扣数据库库存。 */
+    @Test
+    void recoveryReplaysSentMessageAndConvergesExistingOrder() {
+        SeckillOrderMessage message = acceptedMessage(1L, "background-accepted");
+        String original = jdbc.queryForObject("SELECT payload FROM tb_mq_outbox", String.class);
+        jdbc.update("UPDATE tb_mq_outbox SET status='SENT'");
+        jdbc.update("INSERT INTO tb_voucher_order(id,user_id,voucher_id) VALUES(?,?,?)", message.orderId(), 1L, voucherId);
+        jdbc.update("UPDATE tb_seckill_voucher SET stock=9");
+        makeRequestsStale();
+        maintenanceService(store, outbox).recoverDue();
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox", String.class)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT payload FROM tb_mq_outbox", String.class)).isEqualTo(original);
+        orderService(outbox, orders).createFromMessage(message);
+        maintenanceService(store, outbox).processReservationTasks();
+        assertThat(jdbc.queryForObject("SELECT stock FROM tb_seckill_voucher", Integer.class)).isEqualTo(9);
+        assertThat(stock()).isEqualTo("9");
+    }
+
+    /** ACCEPTED 缺 Outbox 可从账本补回同一事件，不重新生成业务编号。 */
+    @Test
+    void recoveryRecreatesMissingOutboxFromLedger() {
+        SeckillOrderMessage message = acceptedMessage(1L, "missing-event");
+        jdbc.update("DELETE FROM tb_mq_outbox");
+        makeRequestsStale();
+        maintenanceService(store, outbox).recoverDue();
+        assertThat(jdbc.queryForObject("SELECT event_id FROM tb_mq_outbox", String.class)).isEqualTo(message.eventId());
+        assertThat(stock()).isEqualTo("9");
+    }
+
+    /** 数据冲突暂停活动并保留 ACCEPTED，不以超时关闭或盲目释放。 */
+    @Test
+    void recoveryConflictPausesAndPreservesAcceptedRequest() {
+        SeckillOrderMessage message = acceptedMessage(1L, "recovery-conflict");
+        redis.opsForHash().put(SeckillReservationStore.keys(voucherId, message.orderId()).get(3), "epoch", "2");
+        makeRequestsStale();
+        maintenanceService(store, outbox).recoverDue();
+        assertThat(requests.findByRequest(1L, "recovery-conflict").getStatus()).isEqualTo(SeckillRequestStatus.ACCEPTED);
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control", String.class)).isEqualTo("PAUSED");
+        assertThat(stock()).isEqualTo("9");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_recovery_attempt WHERE last_error IS NOT NULL", Integer.class)).isEqualTo(1);
+    }
+
+    /** 后台恢复可继续自动发布已落库但从未准备 Redis 的新券。 */
+    @Test
+    void recoveryPublishesPendingCampaign() {
+        SeckillReservationStore unavailable = mock(SeckillReservationStore.class);
+        doThrow(new IllegalStateException("offline")).when(unavailable).initializeCampaign(any(), any(), any(), any(), any(), anyBoolean());
+        Voucher voucher = newVoucher();
+        assertThatThrownBy(() -> voucherService(unavailable, campaigns).addSeckillVoucher(voucher))
+                .isInstanceOf(SeckillCampaignPublicationPendingException.class);
+        trackCampaign(voucher.getId());
+        maintenanceService(store, outbox).recoverDue();
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control WHERE voucher_id=?", String.class, voucher.getId())).isEqualTo("READY");
+    }
+
+    /** 有效发送租约不能被人工重投抢占，失败操作不留下成功审计。 */
+    @Test
+    void controlledReplayDoesNotStealSendingLease() {
+        SeckillOrderMessage message = acceptedMessage(1L, "live-lease");
+        jdbc.update("UPDATE tb_mq_outbox SET status='SENDING',lease_token='active',lease_until=TIMESTAMPADD(SECOND,60,UTC_TIMESTAMP(3))");
+        assertThatThrownBy(() -> maintenanceService(store, outbox).replay(message.orderId(), null, "operator-1", "不能抢租约"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(jdbc.queryForObject("SELECT lease_token FROM tb_mq_outbox", String.class)).isEqualTo("active");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_maintenance_audit", Integer.class)).isZero();
+    }
+
+    /**
+     * 死信先可靠隔离，重投按原账本核对且同事务保留处置审计。
+     * @throws Exception 测试消息序列化失败
+     */
+    @Test
+    void deadLetterQuarantineAndReplayAreDurable() throws Exception {
+        SeckillOrderMessage message = acceptedMessage(1L, "dead-letter");
+        org.apache.rocketmq.common.message.MessageExt raw = new org.apache.rocketmq.common.message.MessageExt();
+        raw.setBody(json.writeValueAsBytes(message)); raw.setMsgId("test-dlq-1"); raw.setTopic("%DLQ%test-cg");
+        OrderMessageFailureStore failures = new OrderMessageFailureStore(maintenanceMapper, manager);
+        RocketMqDeadLetterListener listener = new RocketMqDeadLetterListener(failures);
+        assertThat(listener.consumeMessage(List.of(raw), null)).isEqualTo(ConsumeConcurrentlyStatus.CONSUME_SUCCESS);
+        assertThat(listener.consumeMessage(List.of(raw), null)).isEqualTo(ConsumeConcurrentlyStatus.CONSUME_SUCCESS);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_message_quarantine", Integer.class)).isEqualTo(1);
+        String isolated = jdbc.queryForObject("SELECT quarantine_id FROM tb_seckill_message_quarantine", String.class);
+        jdbc.update("UPDATE tb_mq_outbox SET status='SENT'");
+        maintenanceService(store, outbox).replay(message.orderId(), isolated, "operator-1", "核对死信后重投原订单");
+        assertThat(jdbc.queryForObject("SELECT resolved FROM tb_seckill_message_quarantine", Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox", String.class)).isEqualTo("PENDING");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_maintenance_audit WHERE action='REPLAY'", Integer.class)).isEqualTo(1);
+        assertThat(stock()).isEqualTo("9");
+    }
+
+    /** 隔离原文与请求不一致时，重投和隔离处置一起回滚，不能替换 payload。 */
+    @Test
+    void mismatchedQuarantineRollsBackReplay() {
+        SeckillOrderMessage message = acceptedMessage(1L, "bad-quarantine");
+        org.apache.rocketmq.common.message.MessageExt raw = new org.apache.rocketmq.common.message.MessageExt();
+        raw.setBody("{}".getBytes(java.nio.charset.StandardCharsets.UTF_8)); raw.setMsgId("bad-body"); raw.setTopic("test");
+        new OrderMessageFailureStore(maintenanceMapper, manager).record(raw, "INVALID", "INVALID_JSON");
+        jdbc.update("UPDATE tb_mq_outbox SET status='SENT'");
+        String isolated = jdbc.queryForObject("SELECT quarantine_id FROM tb_seckill_message_quarantine", String.class);
+        assertThatThrownBy(() -> maintenanceService(store, outbox).replay(message.orderId(), isolated, "operator-1", "错误原文不得重投"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox", String.class)).isEqualTo("SENT");
+        assertThat(jdbc.queryForObject("SELECT resolved FROM tb_seckill_message_quarantine", Boolean.class)).isFalse();
+    }
+
+    /** 健康统计和隔离摘要不暴露原文，人工处置只关闭待办并保留审计。 */
+    @Test
+    void healthAndDismissKeepPayloadPrivate() {
+        acceptedMessage(1L, "health");
+        org.apache.rocketmq.common.message.MessageExt raw = new org.apache.rocketmq.common.message.MessageExt();
+        raw.setBody("invalid".getBytes(java.nio.charset.StandardCharsets.UTF_8)); raw.setMsgId("health"); raw.setTopic("test");
+        new OrderMessageFailureStore(maintenanceMapper, manager).record(raw, "INVALID", "BAD_BODY");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        assertThat(((Number) worker.health().get("pending_tasks")).intValue()).isEqualTo(1);
+        assertThat(((Number) worker.health().get("quarantine_pending")).intValue()).isEqualTo(1);
+        assertThat(worker.quarantinedMessages().get(0)).doesNotContainKey("body");
+        String id = jdbc.queryForObject("SELECT quarantine_id FROM tb_seckill_message_quarantine", String.class);
+        worker.dismissQuarantine(id, "operator-1", "确认无效消息无需建单");
+        assertThat(((Number) worker.health().get("quarantine_pending")).intValue()).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_message_quarantine", Integer.class)).isEqualTo(1);
+    }
+
+    /** 恢复失败会持久化退避，下轮立即扫描不反复占用同一请求。 */
+    @Test
+    void failedRecoveryHasDurableBackoff() {
+        SeckillOrderMessage message = acceptedMessage(1L, "recovery-backoff");
+        redis.delete(SeckillReservationStore.keys(voucherId, message.orderId()).get(3));
+        makeRequestsStale();
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.recoverDue();
+        assertThat(worker.recoverDue()).isZero();
+        assertThat(jdbc.queryForObject("SELECT attempts FROM tb_seckill_recovery_attempt", Integer.class)).isEqualTo(1);
+    }
+
+    /** 首次发布的数据冲突被标成 BLOCKED，后台下一轮不重新开放。 */
+    @Test
+    void conflictingPendingPublicationRemainsBlocked() {
+        SeckillReservationStore unavailable = mock(SeckillReservationStore.class);
+        doThrow(new IllegalStateException("offline")).when(unavailable).initializeCampaign(any(), any(), any(), any(), any(), anyBoolean());
+        Voucher voucher = newVoucher();
+        assertThatThrownBy(() -> voucherService(unavailable, campaigns).addSeckillVoucher(voucher))
+                .isInstanceOf(SeckillCampaignPublicationPendingException.class);
+        List<String> keys = trackCampaign(voucher.getId());
+        redis.opsForValue().set(keys.get(0), "7");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.recoverDue();
+        assertThat(jdbc.queryForObject("SELECT publication_status FROM tb_seckill_campaign_control WHERE voucher_id=?", String.class, voucher.getId())).isEqualTo("BLOCKED");
+        assertThat(worker.recoverDue()).isZero();
+        assertThat(redis.opsForValue().get(keys.get(0))).isEqualTo("7");
+    }
+
+    /** 已发布旧代次任务不会操作新代次库存，也不会暂停新的活动代次。 */
+    @Test
+    void oldEpochTaskCannotPauseOrMutateNewEpoch() {
+        SeckillOrderMessage message = acceptedMessage(1L, "old-epoch");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.close(message.orderId(), "operator-1", "旧代次任务保护");
+        jdbc.update("UPDATE tb_seckill_campaign_control SET epoch=2");
+        redis.opsForHash().put(SeckillReservationStore.keys(voucherId, message.orderId()).get(1), "epoch", "2");
+        worker.processReservationTasks();
+        assertThat(stock()).isEqualTo("9");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control", String.class)).isEqualTo("READY");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox WHERE event_type='RELEASE_RESERVATION'", String.class)).isEqualTo("PENDING");
+    }
+
+    /** Redis 确认成功但响应丢失后再次执行只核对确认，不再次扣库存。 */
+    @Test
+    void lostConfirmationReplyConvergesWithoutDeduction() {
+        SeckillOrderMessage message = acceptedMessage(1L, "lost-confirm");
+        orderService(outbox, orders).createFromMessage(message);
+        SeckillReservationStore lostReply = spy(store);
+        doAnswer(call -> { call.callRealMethod(); throw new IllegalStateException("lost reply"); }).when(lostReply)
+                .finish(any(), any(), any(), any(), anyBoolean(), anyBoolean());
+        maintenanceService(lostReply, outbox).processReservationTasks();
+        jdbc.update("UPDATE tb_mq_outbox SET next_retry_at=UTC_TIMESTAMP(3) WHERE event_type='CONFIRM_RESERVATION'");
+        maintenanceService(store, outbox).processReservationTasks();
+        assertThat(stock()).isEqualTo("9");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox WHERE event_type='CONFIRM_RESERVATION'", String.class)).isEqualTo("SENT");
+    }
+
+    /** 隔离消息超过原文上限只存摘要，避免读取接口或数据库被超大消息占满。 */
+    @Test
+    void oversizedMessageQuarantineKeepsDigestOnly() {
+        org.apache.rocketmq.common.message.MessageExt raw = new org.apache.rocketmq.common.message.MessageExt();
+        raw.setBody(new byte[65537]); raw.setTopic("isolated-test"); raw.setMsgId("oversized");
+        new OrderMessageFailureStore(maintenanceMapper, manager).record(raw, "INVALID", "BODY_TOO_LARGE");
+        assertThat(jdbc.queryForObject("SELECT body FROM tb_seckill_message_quarantine", byte[].class)).isNull();
+        assertThat(jdbc.queryForObject("SELECT body_hash FROM tb_seckill_message_quarantine", String.class)).hasSize(64);
+    }
+
+    /** Redis 已释放但数据库回执事务回滚，任务仍能重试且不会重复回补。 */
+    @Test
+    void reservationReceiptRollbackIsRecoverable() {
+        SeckillOrderMessage message = acceptedMessage(1L, "receipt-rollback");
+        maintenanceService(store, outbox).close(message.orderId(), "operator-1", "回执事务回滚验证");
+        MqOutboxMapper failing = mock(MqOutboxMapper.class, delegatesTo(outbox));
+        doAnswer(call -> {
+            outbox.markSent(call.getArgument(0), call.getArgument(1), call.getArgument(2));
+            throw new IllegalStateException("receipt commit failed");
+        }).when(failing).markSent(anyString(), anyString(), anyString());
+        maintenanceService(store, failing).processReservationTasks();
+        assertThat(stock()).isEqualTo("10");
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox WHERE event_type='RELEASE_RESERVATION'", String.class)).isEqualTo("PENDING");
+        jdbc.update("UPDATE tb_mq_outbox SET next_retry_at=UTC_TIMESTAMP(3) WHERE event_type='RELEASE_RESERVATION'");
+        maintenanceService(store, outbox).processReservationTasks();
+        assertThat(stock()).isEqualTo("10");
+    }
+
+    /** 释放任务写入失败必须连同关闭状态一起回滚，不能丢失回补任务。 */
+    @Test
+    void closureAndReleaseTaskAreAtomic() {
+        SeckillOrderMessage message = acceptedMessage(1L, "close-rollback");
+        MqOutboxMapper failing = mock(MqOutboxMapper.class, delegatesTo(outbox));
+        doThrow(new IllegalStateException("task insert failed")).when(failing).insertEvent(any());
+        assertThatThrownBy(() -> maintenanceService(store, failing).close(message.orderId(), "operator-1", "任务写入失败验证"))
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(requests.findByRequest(1L, "close-rollback").getStatus()).isEqualTo(SeckillRequestStatus.ACCEPTED);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_mq_outbox WHERE event_type='RELEASE_RESERVATION'", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_maintenance_audit", Integer.class)).isZero();
+        assertThat(stock()).isEqualTo("9");
+    }
+
+    /** 进程退出后的过期本地任务租约可接管，旧令牌不能覆盖新执行结果。 */
+    @Test
+    void expiredReservationLeaseIsTakenOver() {
+        SeckillOrderMessage message = acceptedMessage(1L, "local-lease-takeover");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        worker.close(message.orderId(), "operator-1", "任务进程退出验证");
+        jdbc.update("UPDATE tb_mq_outbox SET status='SENDING',lease_token='old-owner',lease_until=TIMESTAMPADD(SECOND,-1,UTC_TIMESTAMP(3)) WHERE event_type='RELEASE_RESERVATION'");
+        assertThat(worker.processReservationTasks()).isEqualTo(1);
+        assertThat(outbox.markSent("release-" + message.orderId(), "old-owner", "late-receipt")).isZero();
+        assertThat(stock()).isEqualTo("10");
+        assertThat(jdbc.queryForObject("SELECT broker_message_id FROM tb_mq_outbox WHERE event_type='RELEASE_RESERVATION'", String.class)).isEqualTo("redis-released");
+    }
+
+    /** PREPARING 恢复遇到已释放预占时暂停活动，不把冲突误当正常重试继续扣库。 */
+    @Test
+    void preparingConflictPausesWithoutNewReservation() {
+        MqOutboxMapper failing = mock(MqOutboxMapper.class, delegatesTo(outbox));
+        doThrow(new IllegalStateException("outbox failed")).when(failing).insertEvent(any());
+        assertThatThrownBy(() -> service(failing, store).accept(1L, voucherId, "preparing-conflict", "trace"))
+                .isInstanceOf(SeckillAcceptancePendingException.class);
+        Long id = requests.findByRequest(1L, "preparing-conflict").getOrderId();
+        store.finish(voucherId, 1L, id, 1L, false, false);
+        makeRequestsStale();
+        maintenanceService(store, outbox).recoverDue();
+        assertThat(stock()).isEqualTo("10");
+        assertThat(requests.findByRequest(1L, "preparing-conflict").getStatus()).isEqualTo(SeckillRequestStatus.PREPARING);
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control", String.class)).isEqualTo("PAUSED");
+    }
+
+    /**
+     * 显式关闭与消费者竞争同一请求，只能得到成功或关闭之一，补偿后两端库存一致。
+     * @throws Exception 并发任务失败或超时
+     */
+    @Test
+    void closeAndConsumerRaceHasOneTerminalOutcome() throws Exception {
+        SeckillOrderMessage message = acceptedMessage(1L, "close-consume-race");
+        SeckillMaintenanceServiceImpl worker = maintenanceService(store, outbox);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<?> creating = pool.submit(() -> {
+                try { start.await(); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new IllegalStateException(ex); }
+                consumeWithRetry(orderService(outbox, orders), message);
+            });
+            Future<?> closing = pool.submit(() -> {
+                try { start.await(); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new IllegalStateException(ex); }
+                for (int attempt = 0; attempt < 100; attempt++) {
+                    try {
+                        worker.close(message.orderId(), "operator-1", "关闭和建单并发验证");
+                        return;
+                    } catch (org.springframework.dao.PessimisticLockingFailureException locked) {
+                        try { Thread.sleep(10); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new IllegalStateException(ex); }
+                    } catch (IllegalStateException terminal) {
+                        if (requests.findByRequest(1L, "close-consume-race").getStatus() == SeckillRequestStatus.SUCCEEDED) {
+                            return;
+                        }
+                        throw terminal;
+                    }
+                }
+                throw new IllegalStateException("关闭竞争未收敛");
+            });
+            start.countDown(); creating.get(10, TimeUnit.SECONDS); closing.get(10, TimeUnit.SECONDS);
+            worker.processReservationTasks();
+            String state = jdbc.queryForObject("SELECT status FROM tb_seckill_request", String.class);
+            int expectedStock = "SUCCEEDED".equals(state) ? 9 : 10;
+            assertThat(state).isIn("SUCCEEDED", "CLOSED");
+            assertThat(stock()).isEqualTo(String.valueOf(expectedStock));
+            assertThat(jdbc.queryForObject("SELECT stock FROM tb_seckill_voucher", Integer.class)).isEqualTo(expectedStock);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_voucher_order", Integer.class)).isEqualTo("SUCCEEDED".equals(state) ? 1 : 0);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    /**
+     * 真实 Broker 将隔离组的单条失败消息转入死信，正式监听器提交数据库隔离后确认。
+     * @throws Exception 客户端配置、死信等待或数据库核对失败
+     */
+    @Test
+    @EnabledIfEnvironmentVariable(named = "ROCKETMQ_SMOKE_TEST", matches = "true")
+    void realBrokerDeadLetterIsDurablyQuarantined() throws Exception {
+        SeckillOrderMessage message = acceptedMessage(1L, "real-dlq");
+        String suffix = UUID.randomUUID().toString().replace("-", "");
+        RocketMqProperties properties = new RocketMqProperties();
+        properties.setNameServer(System.getenv().getOrDefault("ROCKETMQ_NAMESERVER", "10.211.55.9:9876"));
+        properties.setOrderTopic(System.getenv().getOrDefault("ROCKETMQ_SMOKE_TOPIC", "hmdp-order-smoke"));
+        assertThat(properties.getOrderTopic()).startsWith("hmdp-order-smoke");
+        properties.setProducerGroup("hmdp-phase4-producer-" + suffix);
+        properties.setAccessKey(System.getenv("ROCKETMQ_ACCESS_KEY")); properties.setSecretKey(System.getenv("ROCKETMQ_SECRET_KEY"));
+        var consumerProperties = new com.hmdp.config.OrderConsumerProperties();
+        consumerProperties.setGroup("hmdp-phase4-consumer-" + suffix);
+        consumerProperties.setDeadLetterGroup("hmdp-phase4-dlq-" + suffix);
+        consumerProperties.setDeadLetterEnabled(true); consumerProperties.setThreads(1);
+        RocketMqConfiguration configuration = new RocketMqConfiguration(properties);
+        DefaultMQProducer producer = configuration.rocketMqProducer();
+        com.hmdp.service.ISeckillOrderService unavailable = mock(com.hmdp.service.ISeckillOrderService.class);
+        doThrow(new IllegalStateException("test forced retry")).when(unavailable).createFromMessage(any());
+        OrderMessageFailureStore failures = new OrderMessageFailureStore(maintenanceMapper, manager);
+        RocketMqOrderListener business = new RocketMqOrderListener(json, unavailable, failures);
+        DefaultMQPushConsumer consumer = configuration.rocketMqOrderConsumer(consumerProperties, business, unavailable);
+        RocketMqDeadLetterListener deadLetters = new RocketMqDeadLetterListener(failures);
+        DefaultMQPushConsumer observer = configuration.rocketMqDeadLetterConsumer(consumerProperties, deadLetters);
+        CountDownLatch isolated = new CountDownLatch(1);
+        consumer.registerMessageListener((MessageListenerConcurrently) (messages, context) -> {
+            for (var raw : messages) {
+                if (raw.getKeys() != null && Arrays.asList(raw.getKeys().split(" ")).contains(message.eventId())) {
+                    // SDK 明确约定 -1 直接进入本组 DLQ，仅用于单条隔离验证，不是生产重试策略。
+                    context.setDelayLevelWhenNextConsume(-1);
+                    return business.consumeMessage(List.of(raw), context);
+                }
+            }
+            return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+        });
+        observer.registerMessageListener((MessageListenerConcurrently) (messages, context) -> {
+            ConsumeConcurrentlyStatus result = deadLetters.consumeMessage(messages, context);
+            if (result == ConsumeConcurrentlyStatus.CONSUME_SUCCESS) {
+                isolated.countDown();
+            }
+            return result;
+        });
+        try {
+            producer.start();
+            // 只创建随机测试组的 DLQ，并显式给测试 Topic 可读权限；不修改正式 Topic。
+            producer.createTopic("TBW102", "%DLQ%" + consumerProperties.getGroup(), 1, Map.of());
+            observer.start(); consumer.start();
+            new RocketMqOrderPublisher(producer, json, properties).publish(message);
+            assertThat(isolated.await(45, TimeUnit.SECONDS)).isTrue();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_message_quarantine WHERE source='DLQ'", Integer.class)).isEqualTo(1);
+            assertThat(requests.findByRequest(1L, "real-dlq").getStatus()).isEqualTo(SeckillRequestStatus.ACCEPTED);
+            assertThat(stock()).isEqualTo("9");
+        } finally {
+            observer.shutdown(); consumer.shutdown(); producer.shutdown();
+        }
+    }
+
+    /**
+     * 组装真实补偿和恢复服务，不启用周期线程，按用例主动推进每一轮。
+     * @param reservations 真实 Redis 组件或单点故障替身
+     * @param events 真实 Outbox 或单点故障替身
+     * @return 使用真实数据库事务的维护服务
+     */
+    private SeckillMaintenanceServiceImpl maintenanceService(SeckillReservationStore reservations, MqOutboxMapper events) {
+        return new SeckillMaintenanceServiceImpl(maintenanceMapper, campaigns, requests, orders, events, reservations,
+                service(outbox, store), voucherService(store, campaigns), json, manager,
+                new SeckillOrderProperties(), new SeckillMaintenanceProperties());
+    }
+
+    /** 将隔离用例的未终态请求置为长期未更新，不实际等待一分钟。 */
+    private void makeRequestsStale() {
+        jdbc.update("UPDATE tb_seckill_request SET updated_at=TIMESTAMPADD(SECOND,-120,UTC_TIMESTAMP(3))");
     }
 
     /**

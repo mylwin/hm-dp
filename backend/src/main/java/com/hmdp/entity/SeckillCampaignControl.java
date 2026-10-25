@@ -21,4 +21,8 @@ public class SeckillCampaignControl {
      * 状态
      */
     private String status;
+    /**
+     * 首次发布状态：UNMANAGED 历史活动、PENDING 待发布、PUBLISHED 已发布、BLOCKED 冲突暂停。
+     */
+    private String publicationStatus;
 }

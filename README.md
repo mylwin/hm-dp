@@ -49,6 +49,10 @@ SDK 默认不额外重试，未得到 `SEND_OK` 时向调用方报告失败或�
 [订单 RocketMQ 第三阶段说明](docs/optimization/order/ROCKETMQ_PHASE3.md)。
 从创建新券开始测试可按 [购买联调指南](docs/optimization/order/ROCKETMQ_PURCHASE_TEST.md) 操作，包含 SQL、Redis 初始化和 HTTP 请求。
 
+第四阶段已补齐新券自动发布、预占确认/释放、后台恢复、非法消息与死信隔离、日志告警及受控重投，待联合验收。
+启用前先执行第四阶段两份数据库迁移；运维接口默认关闭。当前实现、测试和验收步骤见
+[第四阶段完整说明](docs/optimization/order/ROCKETMQ_PHASE4.md)。旧 Stream 排空和正式切换仍留在第五阶段。
+
 独立收发验证在项目根目录执行，不启动 Spring Boot、MySQL、Redis 或订单落库逻辑：
 
 ```bash
