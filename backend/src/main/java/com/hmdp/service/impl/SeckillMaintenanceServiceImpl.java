@@ -201,14 +201,12 @@ public class SeckillMaintenanceServiceImpl implements ISeckillMaintenanceService
             try {
                 // 如果请求状态为 PREPARING
                 if (candidate.getStatus() == SeckillRequestStatus.PREPARING) {
-                    // 如果原订单已存在则抛出异常
-                    if (orders.findOrder(candidate.getOrderId()) != null) {
-                        throw new SeckillConsistencyException("PREPARING 已有原订单，禁止重新预占");
-                    }
+                    // 候选是扫描时的旧快照；须持锁重新检查，避免把随后正常建成的订单误判为冲突。
+                    if (!isStillPreparing(candidate)) continue;
                     // accept 会重新锁活动和请求，并复用原请求、原订单及原 traceId。
                     acceptance.accept(candidate.getUserId(), candidate.getVoucherId(), candidate.getRequestId(), candidate.getTraceId());
                 } else {
-                    // 如果
+                    // 长期 ACCEPTED 继续核对原订单、预占和建单事件。
                     replay(candidate.getOrderId(), null, "SYSTEM", "长期 ACCEPTED 事实核对与原事件恢复");
                 }
             } catch (RuntimeException ex) {
@@ -221,6 +219,27 @@ public class SeckillMaintenanceServiceImpl implements ISeckillMaintenanceService
             }
         }
         return processed;
+    }
+
+    /**
+     * 按活动共享锁、请求排他锁的顺序重新核对 PREPARING；已被其他线程推进时直接跳过。
+     * 只有当前状态仍为 PREPARING 且原订单已经存在，才认定数据冲突；检查结束后释放锁，由受理再次加锁继续。
+     *
+     * @param candidate 扫描时的 PREPARING 快照，只用于找到原活动及请求
+     * @return 当前仍为 PREPARING 且没有原订单时为 true；已推进为其他状态时为 false
+     * @throws SeckillConsistencyException 当前 PREPARING 已有原订单，禁止重新预占
+     * @throws IllegalStateException       原请求已不存在
+     */
+    private boolean isStillPreparing(SeckillRequest candidate) {
+        return Boolean.TRUE.equals(transaction().execute(status -> {
+            campaigns.lockShared(candidate.getVoucherId());
+            SeckillRequest currentRequest = requireRequest(requests.lockByOrderId(candidate.getOrderId()));
+            if (currentRequest.getStatus() != SeckillRequestStatus.PREPARING) return false;
+            if (orders.findOrder(currentRequest.getOrderId()) != null) {
+                throw new SeckillConsistencyException("PREPARING 已有原订单，禁止重新预占");
+            }
+            return true;
+        }));
     }
 
     /**

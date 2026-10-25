@@ -240,7 +240,7 @@ flowchart TD
 关闭成功不代表当场已回补。与消费者竞争同一个请求锁时，只能有一个终态：消费者先成功，关闭被拒绝；
 关闭先提交，迟到消费者读取 CLOSED 后不建单。此接口不取消已创建订单，也不处理支付或退款。
 
-实现：[close](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L340)。
+实现：[close](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L359)。
 
 <a id="flow-07"></a>
 
@@ -269,7 +269,7 @@ flowchart TD
 历史 UNMANAGED 和已标记 BLOCKED 的活动不在此扫描范围。锁或数据库故障使本轮暂停保存失败时，仍不能声称已成功隔离。
 
 实现：[recoverDue 的活动分支](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L158)、
-[claimRecovery](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L234)。
+[claimRecovery](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L253)。
 
 <a id="flow-08"></a>
 
@@ -277,9 +277,12 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["扫描长期未更新的 PREPARING<br/>并领取 REQUEST 恢复资格"] --> B{"原订单号已存在数据库订单？"}
-    B -->|是| CONFLICT["保留原请求<br/>记录冲突并转流程 10"]
-    B -->|否| C["用账本原 userId、voucherId<br/>requestId、traceId 调用 accept"]
+    A["扫描长期未更新的 PREPARING<br/>并领取 REQUEST 恢复资格"] --> CHECK["第五阶段补充：短事务内<br/>活动 S 锁 → 请求 X 锁，重读当前状态"]
+    CHECK --> STILL{"当前仍为 PREPARING？"}
+    STILL -->|否| SKIP["提交检查事务并跳过旧候选<br/>不误暂停已经推进的请求"]
+    STILL -->|是| B{"原订单号已存在数据库订单？"}
+    B -->|是| CONFLICT["检查事务回滚后保留原请求<br/>记录冲突并转流程 10"]
+    B -->|否| C["提交检查事务后，用原 userId、voucherId<br/>requestId、traceId 调用 accept"]
     C --> D{"重新读取的请求仍为 PREPARING？"}
     D -->|否| DONE["返回原持久化状态<br/>不再次预占"]
     D -->|是| E["独立受理事务<br/>活动 S 锁 → 请求 X 锁，再检查状态"]
@@ -298,7 +301,7 @@ flowchart TD
 
 原受理事务先结束，恢复程序再记录失败或暂停，不能带着共享锁直接升级活动排他锁。
 已存在的 PREPARING 账本是复用原编号的依据；不覆盖人工删除账本等破坏性修改场景。
-图中第一次订单事实检查按候选 PREPARING 快照进入，`accept` 内部才会重新读取和加锁检查最新请求状态。
+图中扫描候选的第一次状态及订单事实检查已按第五阶段修复改为持锁重读，避免旧快照误判；`accept` 内部仍会独立重新读取和加锁检查。详见 [第五阶段说明](ROCKETMQ_PHASE5.md)。
 
 实现：[recoverDue 的请求分支](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L158)、
 [accept](../../../backend/src/main/java/com/hmdp/service/impl/SeckillRequestServiceImpl.java#L132)、
@@ -333,7 +336,7 @@ flowchart TD
 本流程仅对 CREATE_ORDER 的原事件操作；本地确认/释放任务由流程 03 处理。
 正常的年龄阈值只触发核对和告警，不是关闭依据。
 
-实现：[replayLocked](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L279)、
+实现：[replayLocked](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L298)、
 [verify-reservation.lua](../../../backend/src/main/resources/lua/seckill/verify-reservation.lua)。
 
 <a id="flow-10"></a>
@@ -361,7 +364,7 @@ flowchart TD
 暂停不关闭请求、不释放库存，也不自动重开活动。
 同代次且事实一致的已登记确认/释放仍可继续执行；要获得重建所需的静止快照，必须持有活动排他锁协调全部新链路写入口。
 
-实现：[pauseConflict](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L429)、
+实现：[pauseConflict](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L448)、
 [SeckillMaintenanceMapper.pause](../../../backend/src/main/java/com/hmdp/mapper/SeckillMaintenanceMapper.java)。
 
 <a id="flow-11"></a>
@@ -392,7 +395,7 @@ flowchart TD
 隔离提交成功后 Broker 再次投递同一非法消息也可幂等保存；批次中其他消息失败时，已提交结果由各自幂等保护。
 
 实现：[RocketMqOrderListener.consumeMessage](../../../backend/src/main/java/com/hmdp/infrastructure/mq/RocketMqOrderListener.java#L42)、
-[OrderMessageFailureStore.record](../../../backend/src/main/java/com/hmdp/infrastructure/mq/OrderMessageFailureStore.java#L40)。
+[OrderMessageFailureStore.record](../../../backend/src/main/java/com/hmdp/infrastructure/mq/OrderMessageFailureStore.java#L44)。
 
 <a id="flow-12"></a>
 
@@ -490,8 +493,8 @@ flowchart TD
 PENDING、SENT 或租约已过期的 SENDING 可以按条件唤醒；尚有效的 SENDING 拒绝重投。
 隔离原文与账本不一致的校验失败不会自动替换 payload，也不等同于自动暂停活动。
 
-实现：[replay](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L255)、
-[replayLocked](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L279)、
+实现：[replay](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L274)、
+[replayLocked](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L298)、
 [replayEvent](../../../backend/src/main/java/com/hmdp/mapper/SeckillMaintenanceMapper.java)。
 
 <a id="flow-15"></a>
@@ -517,7 +520,7 @@ flowchart TD
 
 重复处置返回失败，不新增库存动作。恢复扫描仍按账本处理长期请求；处置隔离记录不会阻止该请求按其他恢复路径继续推进。
 
-实现：[dismissQuarantine](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L382)。
+实现：[dismissQuarantine](../../../backend/src/main/java/com/hmdp/service/impl/SeckillMaintenanceServiceImpl.java#L401)。
 
 <a id="flow-16"></a>
 
@@ -540,7 +543,7 @@ flowchart TD
 默认年龄阈值 120 秒、尝试次数 10。指标中的 `expired_leases` 用于排查，但代码没有把“存在过期租约”单独设为即时告警条件。
 这里是数据库业务待办与应用日志监控，不是 Broker 精确队列积压指标，也没有自动发送邮件或短信。
 
-实现：[SeckillMaintenanceJob.monitor](../../../backend/src/main/java/com/hmdp/infrastructure/seckill/SeckillMaintenanceJob.java#L65)、
+实现：[SeckillMaintenanceJob.monitor](../../../backend/src/main/java/com/hmdp/infrastructure/seckill/SeckillMaintenanceJob.java#L69)、
 [SeckillMaintenanceMapper.health](../../../backend/src/main/java/com/hmdp/mapper/SeckillMaintenanceMapper.java)。
 
 ## 建议阅读顺序

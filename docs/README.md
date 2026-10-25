@@ -19,6 +19,7 @@
 - [订单 RocketMQ 第四阶段：自动发布、预占补偿、请求恢复、死信隔离与联合验收](optimization/order/ROCKETMQ_PHASE4.md)
 - [订单 RocketMQ 第四阶段流程图解：16 个独立 Mermaid 流程](optimization/order/ROCKETMQ_PHASE4_FLOWS.md)
 - [订单 RocketMQ 第四阶段新增 Lua：初始化、确认释放和预占核对 Mermaid 图](optimization/order/ROCKETMQ_PHASE4_LUA_FLOWS.md)
+- [订单 RocketMQ 第五阶段：新路径启用、暂停提交与故障并发验收](optimization/order/ROCKETMQ_PHASE5.md)
 - [创建测试券并从购买验证 MQ 建单（含 SQL、Redis 初始化及 HTTP 请求）](optimization/order/ROCKETMQ_PURCHASE_TEST.md)
 
 ### 缓存优化
@@ -40,6 +41,7 @@
 ## 前端
 
 - [前端开发、接口与部署说明](frontend/README.md)
+- [秒杀维护页：本地开关、运维接口和验证说明](frontend/SECKILL_MAINTENANCE.md)
 - [页面迁移与接口覆盖](frontend/MIGRATION.md)
 - [图片与图标来源](frontend/ASSETS.md)
 

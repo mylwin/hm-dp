@@ -2,8 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { isBackendApi } from './helpers/api-route';
 import preview from '../src/mocks/preview-data.json' with { type: 'json' };
 
-// 这组契约测试通过独立配置显式启用新链路，普通前端回归保持原入口。
-test.skip(process.env.HMDP_SECKILL_E2E !== 'true', '使用独立秒杀测试配置');
+// 默认界面只走新链路；独立配置可在单独端口运行本组契约测试。
 
 type Scenario = { failSubmit?: boolean; failQuery?: boolean; stock?: number; rejected?: boolean; notFoundOnce?: boolean; userId?: number };
 async function setup(page: Page, scenario: Scenario = {}) {

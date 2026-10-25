@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useApp } from '../app-context';
 import { LoginDialog } from './auth/login-dialog';
 import { Loading, Modal } from './ui';
+import { seckillOpsEnabled } from '../lib/local-tools';
 
 export function Brand({ footer = false }: { footer?: boolean }) {
   return <Link to="/" className={`brand ${footer ? 'footer-brand' : ''}`}><span className="brand-mark"><Storefront size={29} weight="fill" /></span><span><strong>黑马点评</strong><small>发现生活的好去处</small></span></Link>;
@@ -32,7 +33,7 @@ export function Layout() {
       <button className="location-button" onClick={() => setCityOpen(true)} aria-label="查看当前城市杭州"><MapPin size={18} weight="fill" />杭州<CaretDown size={12} /></button>
       <form className="global-search" onSubmit={submit} role="search"><label htmlFor="global-search" className="sr-only">搜索商家</label><MagnifyingGlass size={21} /><input id="global-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索商家，发现想去的好店" autoComplete="off" /><button type="submit">搜索</button></form>
       <button className="account-button" aria-label={user ? `${user.nickName}的个人中心` : '登录 / 注册'} onClick={() => user ? navigate('/account') : setLoginOpen(true)}><UserCircle size={27} /><span>{user?.nickName || '登录 / 注册'}</span></button>
-    </div><nav className="container main-nav" aria-label="主导航"><NavLink to="/" end className={({ isActive }) => isActive && !location.hash ? 'active' : ''}>首页</NavLink><NavLink to="/shops">发现好店</NavLink><NavLink to="/stories">探店笔记</NavLink><NavLink to="/account">个人中心</NavLink><Link className="nav-publish" to="/stories/new"><span><NotePencil size={16} />发布笔记</span></Link></nav></header>
+    </div><nav className={`container main-nav${seckillOpsEnabled ? ' has-local-tools' : ''}`} aria-label="主导航"><NavLink to="/" end className={({ isActive }) => isActive && !location.hash ? 'active' : ''}>首页</NavLink><NavLink to="/shops">发现好店</NavLink><NavLink to="/stories">探店笔记</NavLink><NavLink to="/account">个人中心</NavLink>{seckillOpsEnabled && <NavLink to="/local/seckill">秒杀维护</NavLink>}<Link className="nav-publish" to="/stories/new"><span><NotePencil size={16} />发布笔记</span></Link></nav></header>
     {mode === 'preview' && <div className="preview-banner"><div className="container"><Code size={15} /><span>设计预览：资料来自项目示例库，部分图片为示意；发布、点赞等操作需连接后端。</span><button onClick={() => setMode('live')}>连接后端 <ArrowRight size={14} /></button></div></div>}
     <main id="main-content" tabIndex={-1}><Suspense fallback={<div className="container route-loading"><Loading /></div>}><Outlet /></Suspense></main>
     <footer className="site-footer"><div className="container footer-main"><Brand footer /><p>从一顿好饭、一次相聚开始，<br />发现身边每一种值得期待的生活。</p><div className="footer-links"><Link to="/shops">发现好店</Link><Link to="/stories">探店笔记</Link><a href="#main-content">返回顶部</a></div></div><div className="container footer-bottom"><span>黑马点评 · 本地生活发现平台</span><span>认真生活，慢慢发现。</span></div></footer>

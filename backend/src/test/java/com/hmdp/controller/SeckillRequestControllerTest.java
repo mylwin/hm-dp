@@ -1,6 +1,7 @@
 package com.hmdp.controller;
 
 import com.hmdp.constants.SeckillRequestStatus;
+import com.hmdp.config.SeckillOrderProperties;
 import com.hmdp.dto.SeckillRequestResult;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.exception.SeckillAcceptancePendingException;
@@ -18,7 +19,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** 验证接口用户来源、未知结果和长编号传输，不访问数据库。 */
 class SeckillRequestControllerTest {
     private final ISeckillRequestService requests = mock(ISeckillRequestService.class);
-    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new SeckillRequestController(requests)).build();
+    private final SeckillOrderProperties properties = new SeckillOrderProperties();
+    private final MockMvc mvc = MockMvcBuilders.standaloneSetup(new SeckillRequestController(requests, properties)).build();
 
     /** 清除当前线程身份，避免测试互相污染。 */
     @AfterEach
@@ -86,6 +88,23 @@ class SeckillRequestControllerTest {
         mvc.perform(post("/voucher-order/reliable/seckill/30").contentType("application/json").content("{"))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(requests);
+    }
+
+    /**
+     * 暂停提交不创建账本，但原请求查询仍然可用，便于维护期间收尾。
+     * @throws Exception MVC 请求失败
+     */
+    @Test
+    void pausedAdmissionKeepsQueriesAvailable() throws Exception {
+        login();
+        properties.setAcceptingRequests(false);
+        mvc.perform(post("/voucher-order/reliable/seckill/30").contentType("application/json")
+                .content("{\"requestId\":\"request-1\"}"))
+                .andExpect(status().isServiceUnavailable());
+        verifyNoInteractions(requests);
+        when(requests.queryByRequest(1L, "request-1")).thenReturn(result(SeckillRequestStatus.ACCEPTED));
+        mvc.perform(get("/voucher-order/reliable/requests/request-1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("ACCEPTED"));
     }
 
     /** 设置模拟鉴权身份。 */

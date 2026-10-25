@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  testIgnore: '**/seckill-maintenance.spec.ts',
   timeout: 45000,
   fullyParallel: false,
   workers: 1,

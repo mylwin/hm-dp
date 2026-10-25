@@ -1,5 +1,8 @@
 # 黑马点评 Web 商城
 
+当前抢购固定使用 `/voucher-order/reliable`，不再使用旧 Stream 接口或前端选择开关。
+新券自动初始化、暂停提交配置及验证范围见 [第五阶段说明](../optimization/order/ROCKETMQ_PHASE5.md)。
+
 独立的 React + TypeScript 桌面前端。包含首页、商家列表、商家详情、探店列表与详情、
 笔记发布、个人中心和作者主页。
 旧前端源码保留在 `frontend/legacy/`；`frontend/nginx-1.18.0/` 仅保留运行环境及兼容入口。
@@ -37,6 +40,15 @@ npm run dev
 公开昵称与头像；个人详情资料缺失时不编造粉丝数等统计。
 
 ## 连接后端
+
+### 本地秒杀维护工具
+
+在 `frontend/web/` 执行 `VITE_SECKILL_OPS_ENABLED=true npm run dev`，
+访问 <http://127.0.0.1:5173/local/seckill?preview=0>。该页面默认关闭，生产构建不注册。
+支持健康指标、隔离摘要、原消息重投、未建单请求关闭和隔离处置；需要普通登录及独立运维令牌。
+后端开关、操作语义和独立浏览器测试命令见 [秒杀维护页说明](SECKILL_MAINTENANCE.md)。
+
+### 通用接口与登录
 
 默认由 Vite 将 `/api` 代理到 `http://127.0.0.1:8081`，并移除 `/api` 前缀。
 如需修改目标，复制 `.env.example` 为 `.env.local`，调整 `API_PROXY_TARGET` 后重启。

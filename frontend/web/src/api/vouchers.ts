@@ -11,11 +11,13 @@ export function createVouchers(mode: DataMode) {
   };
 }
 
+/** @deprecated 旧 Stream 请求仅保留为历史参考，当前界面使用 submitReliableSeckill。 */
 export function seckill(id: Id): Promise<Id> {
   return request(`/voucher-order/seckill/${encodeURIComponent(id)}`, { method: 'POST' });
 }
 
-export const reliableSeckillEnabled = import.meta.env.VITE_RELIABLE_SECKILL_ENABLED === 'true';
+// 当前仅使用新链路；旧页面分支保留作参考，不再由环境变量启用。
+export const reliableSeckillEnabled = true;
 
 export type SeckillRequestResult = {
   orderId: string;

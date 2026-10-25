@@ -441,6 +441,8 @@ input::placeholder { color: var(--muted); opacity: 1; }
   .global-search input { font-size: 16px; }
   .global-search button { padding-inline: 20px; font-size: 14px; }
   .main-nav { gap: 28px; height: 44px; }
+  .main-nav.has-local-tools { overflow-x: auto; gap: 20px; }
+  .main-nav.has-local-tools > a { flex-shrink: 0; white-space: nowrap; }
   .main-nav > a { font-size: 14px; }
   .nav-description { display: none; }
   .preview-banner > div { padding-block: 7px; align-items: flex-start; gap: 6px; font-size: 10px; }

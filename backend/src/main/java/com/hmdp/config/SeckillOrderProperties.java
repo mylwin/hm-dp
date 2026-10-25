@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * 新受理组件开关；不用于切换现有秒杀 HTTP 入口。
+ * 新链路组件、API 和接单开关；暂停接单时仍保留结果查询及后台收尾。
  *
  * @author myl
  */
@@ -18,9 +18,13 @@ public class SeckillOrderProperties {
      */
     private boolean reliableComponentsEnabled;
     /**
-     * 是否开放新链路的独立联调接口，与可靠组件开关共同控制注册。
+     * 是否开放新链路抢购和结果查询接口，与可靠组件开关共同控制注册。
      */
     private boolean reliableApiEnabled;
+    /**
+     * 是否接收新的 HTTP 抢购提交；关闭后查询、已受理订单消费及恢复仍继续。
+     */
+    private boolean acceptingRequests = true;
     /**
      * 短事务超时秒数，单位秒
      */

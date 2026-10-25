@@ -1,5 +1,7 @@
 # 从创建优惠券到 MQ 建单的手动联调
 
+> **第五阶段使用方式**：前端默认只走 `/voucher-order/reliable`，无需设置 `VITE_RELIABLE_SECKILL_ENABLED`；旧接口及消费者停止注册。请优先通过 `POST /voucher/seckill` 创建自动就绪的新券，沿用原 requestId 查询或重试。当前验收边界见 [第五阶段说明](ROCKETMQ_PHASE5.md)。下文第三阶段手工造数及当时的确认任务状态保留为历史演练。
+
 ## 第四阶段接口发券说明
 
 2026-10-25 新增 [自动发布与原券重试指南](ROCKETMQ_PHASE4_1.md)。执行第四阶段迁移并启用可靠组件后，

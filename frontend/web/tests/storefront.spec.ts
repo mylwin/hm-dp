@@ -11,7 +11,7 @@ async function mockApi(page: Page, options: { expired?: boolean; fail?: boolean;
     const path = url.pathname.replace('/api', '');
     calls.push({ path, method: request.method(), token: request.headers().authorization, query: url.search });
     if (options.fail) return route.fulfill({ status: 503, body: 'Unavailable' });
-    if (options.expired && path === '/voucher-order/seckill/99') return route.fulfill({ status: 401, body: '' });
+    if (options.expired && path === '/voucher-order/reliable/seckill/99') return route.fulfill({ status: 401, body: '' });
     let data: unknown = null;
     if (path === '/shop-type/list') data = preview.types;
     else if (path === '/user/me') data = { id: 1, nickName: '接口验证用户' };
@@ -19,9 +19,10 @@ async function mockApi(page: Page, options: { expired?: boolean; fail?: boolean;
     else if (path.startsWith('/shop/of/')) data = options.empty ? [] : preview.shops.slice(0, 5);
     else if (path === '/blog/hot') data = preview.blogs;
     else if (path === '/voucher/list/1') data = [{ ...preview.vouchers[0], id: 99, type: 1, stock: 3, beginTime: '2020-01-01T00:00:00', endTime: '2099-01-01T00:00:00' }, { ...preview.vouchers[0], id: 100, type: 1, stock: 0 }, { ...preview.vouchers[0], id: 101, type: 1, endTime: '2020-01-01T00:00:00' }, { ...preview.vouchers[0], id: 102, type: 1, beginTime: '2099-01-01T00:00:00' }];
-    else if (path === '/voucher-order/seckill/99') {
+    else if (path === '/voucher-order/reliable/seckill/99') {
       await new Promise((resolve) => setTimeout(resolve, 120));
-      return route.fulfill({ contentType: 'application/json', body: '{"success":true,"data":856725678012345678}' });
+      const { requestId } = request.postDataJSON() as { requestId: string };
+      data = { orderId: '856725678012345678', requestId, voucherId: '99', status: 'SUCCEEDED', statusDescription: '建单成功' };
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ success: true, data }) });
   });
@@ -125,9 +126,9 @@ test('秒杀仅提交一次，保留完整长订单编号，并区分库存和�
   await page.getByRole('button', { name: '立即抢购', exact: true }).click();
   await page.getByRole('button', { name: '确认抢购', exact: true }).click();
   await expect(page.getByRole('button', { name: '正在提交，请稍候' })).toBeDisabled();
-  await expect(page.getByText('抢购请求已受理', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '订单创建成功', exact: true })).toBeVisible();
   await expect(page.locator('.order-id')).toHaveText('856725678012345678');
-  expect(calls.filter((call) => call.path === '/voucher-order/seckill/99')).toEqual([{ path: '/voucher-order/seckill/99', method: 'POST', token: 'contract-test-token', query: '' }]);
+  expect(calls.filter((call) => call.path === '/voucher-order/reliable/seckill/99')).toEqual([{ path: '/voucher-order/reliable/seckill/99', method: 'POST', token: 'contract-test-token', query: '' }]);
 });
 
 test('后端错误显示重试入口；401 清理令牌并引导登录', async ({ page }) => {

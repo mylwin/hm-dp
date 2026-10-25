@@ -41,7 +41,7 @@ spring:
       password: ${REDIS_PASSWORD:20041223}
       # 受理事务持有请求行锁时调用 Redis，限制连接与单次命令等待时间。
       connect-timeout: 2s
-      # 旧 Stream 使用 BLOCK 2000ms，命令超时需留出余量，避免空闲读取被误判为故障。
+      # 受理短事务调用 Redis，限制命令等待时间；网络失败保留请求账本供恢复。
       timeout: 3s
       lettuce:
         pool:
@@ -66,7 +66,7 @@ aliyun:
 
 hmdp:
   rocketmq:
-    # 第一阶段仅启用客户端；不会将秒杀业务从 Stream 自动切换到 RocketMQ。
+    # 新链路通过数据库 Outbox 投递订单事件，旧 Stream 消费者不再注册。
     enabled: ${ROCKETMQ_ENABLED:true}
     name-server: ${ROCKETMQ_NAMESERVER:10.211.55.9:9876}  # NameServer服务器地址
     producer-group: ${ROCKETMQ_PRODUCER_GROUP:hmdp-order-producer}    # 生产者组
@@ -90,9 +90,10 @@ hmdp:
       dead-letter-enabled: ${ORDER_DEAD_LETTER_ENABLED:true} # 当前组死信持久化隔离
       dead-letter-group: ${ORDER_DEAD_LETTER_GROUP:hmdp-seckill-order-dlq-cg}
   seckill:
-    # 新组件和独立接口用于联调；原秒杀 HTTP 入口仍走旧 Stream。
+    # 唯一抢购入口为 /voucher-order/reliable，使用前须完成订单表和索引迁移。
     reliable-components-enabled: ${SECKILL_RELIABLE_COMPONENTS_ENABLED:true}  # 是否开启可靠组件
-    reliable-api-enabled: ${SECKILL_RELIABLE_API_ENABLED:true} # 独立联调接口，不切换旧入口
+    reliable-api-enabled: ${SECKILL_RELIABLE_API_ENABLED:true}
+    accepting-requests: ${SECKILL_ACCEPTING_REQUESTS:true} # 仅暂停提交，结果查询和后台任务继续
     transaction-timeout-seconds: ${SECKILL_TRANSACTION_TIMEOUT_SECONDS:5}  # 事务超时秒数
     maintenance:
       enabled: ${SECKILL_MAINTENANCE_ENABLED:true} # 启用前先执行第四阶段两份迁移

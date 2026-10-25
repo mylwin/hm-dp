@@ -1679,6 +1679,145 @@ class SeckillOutboxIT {
     }
 
     /**
+     * 扫描快照仍为 PREPARING、真实请求已正常建单时，恢复不得误暂停活动。
+     */
+    @Test
+    void stalePreparingSnapshotDoesNotPauseSucceededCampaign() {
+        SeckillOrderMessage message = acceptedMessage(1L, "stale-preparing-snapshot");
+        var staleCandidate = requests.findByRequest(1L, "stale-preparing-snapshot");
+        staleCandidate.setStatus(SeckillRequestStatus.PREPARING);
+        orderService(outbox, orders).createFromMessage(message);
+        SeckillMaintenanceMapper staleScan = mock(SeckillMaintenanceMapper.class, delegatesTo(maintenanceMapper));
+        doReturn(List.of(staleCandidate)).when(staleScan).staleRequests(anyInt(), anyInt());
+        SeckillMaintenanceServiceImpl worker = new SeckillMaintenanceServiceImpl(staleScan, campaigns, requests,
+                orders, outbox, store, service(outbox, store), voucherService(store, campaigns), json, manager,
+                new SeckillOrderProperties(), new SeckillMaintenanceProperties());
+        assertThat(worker.recoverDue()).isEqualTo(1);
+        assertThat(requests.findByRequest(1L, "stale-preparing-snapshot").getStatus()).isEqualTo(SeckillRequestStatus.SUCCEEDED);
+        assertThat(jdbc.queryForObject("SELECT status FROM tb_seckill_campaign_control WHERE voucher_id=?", String.class, voucherId)).isEqualTo("READY");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_maintenance_audit WHERE action='CONSISTENCY_CONFLICT'", Integer.class)).isZero();
+    }
+
+    /**
+     * 通过不响应 Redis 协议的隔离 TCP 端口制造真实连接超时，受理保留原账本，恢复后不换订单号。
+     * @throws Exception 隔离套接字初始化或关闭失败
+     */
+    @Test
+    void realRedisConnectionTimeoutKeepsRequestRecoverable() throws Exception {
+        try (var unavailableEndpoint = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            LettuceConnectionFactory unavailableFactory = unavailableRedisFactory(unavailableEndpoint.getLocalPort());
+            try {
+                SeckillReservationStore unavailableStore = new SeckillReservationStore(new StringRedisTemplate(unavailableFactory));
+                assertThatThrownBy(() -> service(outbox, unavailableStore).accept(1L, voucherId, "redis-offline", "trace"))
+                        .isInstanceOf(SeckillAcceptancePendingException.class);
+                var retainedRequest = requests.findByRequest(1L, "redis-offline");
+                assertThat(retainedRequest.getStatus()).isEqualTo(SeckillRequestStatus.PREPARING);
+                assertThat(count("tb_mq_outbox")).isZero();
+                assertThat(stock()).isEqualTo("10");
+                SeckillAcceptance resumed = service(outbox, store).accept(1L, voucherId, "redis-offline", "trace");
+                assertThat(resumed.orderId()).isEqualTo(retainedRequest.getOrderId());
+                assertThat(resumed.status()).isEqualTo(SeckillRequestStatus.ACCEPTED);
+                assertThat(stock()).isEqualTo("9");
+            } finally {
+                unavailableFactory.destroy();
+            }
+        }
+    }
+
+    /**
+     * 确认任务遇到真实 Redis 连接超时仍保留，连接恢复后完成且不再次扣库存。
+     * @throws Exception 隔离套接字初始化或关闭失败
+     */
+    @Test
+    void realRedisConnectionTimeoutRetainsConfirmationTask() throws Exception {
+        SeckillOrderMessage message = acceptedMessage(1L, "confirm-redis-offline");
+        orderService(outbox, orders).createFromMessage(message);
+        try (var unavailableEndpoint = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            LettuceConnectionFactory unavailableFactory = unavailableRedisFactory(unavailableEndpoint.getLocalPort());
+            try {
+                SeckillReservationStore unavailableStore = new SeckillReservationStore(new StringRedisTemplate(unavailableFactory));
+                assertThat(maintenanceService(unavailableStore, outbox).processReservationTasks()).isEqualTo(1);
+                assertThat(jdbc.queryForObject("SELECT status FROM tb_mq_outbox WHERE event_id=?", String.class,
+                        "confirm-" + message.orderId())).isEqualTo("PENDING");
+                assertThat(requests.findByRequest(1L, "confirm-redis-offline").getStatus()).isEqualTo(SeckillRequestStatus.SUCCEEDED);
+                assertThat(jdbc.queryForObject("SELECT stock FROM tb_seckill_voucher WHERE voucher_id=?", Integer.class, voucherId)).isEqualTo(9);
+            } finally {
+                unavailableFactory.destroy();
+            }
+        }
+        jdbc.update("UPDATE tb_mq_outbox SET next_retry_at=UTC_TIMESTAMP(3) WHERE event_id=?", "confirm-" + message.orderId());
+        assertThat(maintenanceService(store, outbox).processReservationTasks()).isEqualTo(1);
+        assertThat(store.verify(voucherId, 1L, message.orderId(), 1L)).isEqualTo("CONFIRMED");
+        assertThat(stock()).isEqualTo("9");
+    }
+
+    /**
+     * 1000 个不同用户竞争 100 份库存，重复消费后完成全部预占确认，在停止流量的边界检查联合不变量。
+     * 使用真实 MySQL/Redis；消息直接交给正式建单服务，不把本用例耗时解释为 Broker 或 HTTP 吞吐量。
+     * @throws Exception 并发任务失败或超时
+     */
+    @Test
+    void thousandUsersConvergeToOneHundredOrders() throws Exception {
+        jdbc.update("UPDATE tb_seckill_voucher SET stock=100 WHERE voucher_id=?", voucherId);
+        redis.opsForValue().set(SeckillReservationStore.keys(voucherId, 1L).get(0), "100");
+        SeckillRequestServiceImpl acceptance = service(outbox, store);
+        ExecutorService workers = Executors.newFixedThreadPool(16);
+        long startedAtNanos = System.nanoTime();
+        try {
+            List<Callable<SeckillAcceptance>> submissions = new ArrayList<>();
+            for (long userId = 1; userId <= 1000; userId++) {
+                long requestUserId = userId;
+                submissions.add(() -> acceptance.accept(requestUserId, voucherId, "load-" + requestUserId, "load-trace"));
+            }
+            long acceptedCount = 0;
+            for (Future<SeckillAcceptance> submission : workers.invokeAll(submissions, 180, TimeUnit.SECONDS)) {
+                if (submission.get(1, TimeUnit.SECONDS).status() == SeckillRequestStatus.ACCEPTED) acceptedCount++;
+            }
+            assertThat(acceptedCount).isEqualTo(100);
+            assertThat(stock()).isEqualTo("0");
+            List<String> payloads = jdbc.queryForList("SELECT payload FROM tb_mq_outbox WHERE event_type='CREATE_ORDER'", String.class);
+            SeckillOrderServiceImpl consumer = orderService(outbox, orders);
+            List<Callable<Void>> deliveries = new ArrayList<>();
+            for (String payload : payloads) {
+                SeckillOrderMessage message = json.readValue(payload, SeckillOrderMessage.class);
+                for (int duplicate = 0; duplicate < 2; duplicate++) deliveries.add(() -> {
+                    consumeWithRetry(consumer, message);
+                    return null;
+                });
+            }
+            for (Future<Void> delivery : workers.invokeAll(deliveries, 60, TimeUnit.SECONDS)) delivery.get(1, TimeUnit.SECONDS);
+            SeckillMaintenanceServiceImpl settlement = maintenanceService(store, outbox);
+            for (int round = 0; round < 6; round++) settlement.processReservationTasks();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_voucher_order", Integer.class)).isEqualTo(100);
+            assertThat(jdbc.queryForObject("SELECT stock FROM tb_seckill_voucher WHERE voucher_id=?", Integer.class, voucherId)).isZero();
+            assertThat(stock()).isEqualTo("0");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_request WHERE status='SUCCEEDED'", Integer.class)).isEqualTo(100);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_request WHERE status='REJECTED'", Integer.class)).isEqualTo(900);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_seckill_request WHERE status IN ('PREPARING','ACCEPTED')", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_mq_outbox WHERE event_type='CONFIRM_RESERVATION' AND status <> 'SENT'", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tb_voucher_order o JOIN tb_seckill_request r ON o.id=r.order_id WHERE r.status='CLOSED'", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM (SELECT user_id,voucher_id FROM tb_voucher_order GROUP BY user_id,voucher_id HAVING COUNT(*)>1) d", Integer.class)).isZero();
+            System.out.println("PHASE5_COMPONENT_LOAD users=1000 concurrency=16 stock=100 orders=100 rejected=900 elapsedMillis="
+                    + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos));
+        } finally {
+            workers.shutdownNow();
+        }
+    }
+
+    /**
+     * 创建指向隔离无响应端口的真实 Redis 客户端，短超时仅用于故障用例，不修改正常 Redis 服务。
+     * @param unavailablePort 当前测试独占但不响应 Redis 的本地 TCP 端口
+     * @return 已初始化的短超时客户端，调用方必须在 finally 中 destroy
+     */
+    private LettuceConnectionFactory unavailableRedisFactory(int unavailablePort) {
+        RedisStandaloneConfiguration endpoint = new RedisStandaloneConfiguration("127.0.0.1", unavailablePort);
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(endpoint, LettuceClientConfiguration.builder()
+                .commandTimeout(Duration.ofMillis(250)).shutdownTimeout(Duration.ZERO).build());
+        factory.afterPropertiesSet();
+        return factory;
+    }
+
+    /**
      * 组装真实补偿和恢复服务，不启用周期线程，按用例主动推进每一轮。
      * @param reservations 真实 Redis 组件或单点故障替身
      * @param events 真实 Outbox 或单点故障替身

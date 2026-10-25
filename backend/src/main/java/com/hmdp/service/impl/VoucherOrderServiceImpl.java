@@ -21,7 +21,6 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
-import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -36,12 +35,12 @@ import static com.hmdp.constants.LockConstants.*;
 import static com.hmdp.constants.SeckillConstants.*;
 
 /**
- * 优惠券订单服务实现类
+ * 旧 Redis Stream 订单实现，仅保留为历史参考，不再注册为 Spring 组件或自动启动消费者。
  *
  * @author mylwin
  * @since 2026-05-23
  */
-@Service
+@Deprecated
 @Slf4j
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
     @Autowired
