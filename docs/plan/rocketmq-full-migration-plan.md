@@ -6,8 +6,12 @@
 > 幂等建单与结果查询、补偿对账、故障验收与切换五个阶段推进。
 > 第一阶段已完成，见 [订单 RocketMQ 第一阶段说明](../optimization/order/ROCKETMQ_PHASE1.md)；
 > 第二阶段已完成可靠受理、预占与 Outbox 的隔离验证，见 [第二阶段说明](../optimization/order/ROCKETMQ_PHASE2.md)，
-> 新组件默认关闭，尚未切换 HTTP 入口或注册正式订单消费者；
+> 第二阶段交付时新组件默认关闭，尚未切换 HTTP 入口或注册正式订单消费者；
 > 后续可靠性协议以 [秒杀专项设计](rocketmq-seckill-design.md) 为准。
+
+> 第三阶段已实现订单消费、幂等建单与结果查询；当前开发 YAML 默认启用新后端组件、API、Outbox 和消费者，前端需显式开启。
+> 2026-10-25 真实前后端及虚拟机 MQ 隔离联调已通过，提交前完整后端回归 181 项全部通过；详情见
+> [第三阶段说明](../optimization/order/ROCKETMQ_PHASE3.md)。以下旧规划中的“未注册正式消费者”仅指当时的第二阶段状态。
 
 > 范围：把 `hm-dp` 里所有"异步/事件"场景统一到 RocketMQ。
 > 基线：HEAD `203f97a`，Spring Boot 3.5.9 / Java 17，单模块 `backend`，Redis 7 / Redisson 3.52。

@@ -18,6 +18,10 @@ public class SeckillOrderProperties {
      */
     private boolean reliableComponentsEnabled;
     /**
+     * 是否开放新链路的独立联调接口，与可靠组件开关共同控制注册。
+     */
+    private boolean reliableApiEnabled;
+    /**
      * 短事务超时秒数，单位秒
      */
     private int transactionTimeoutSeconds = 5;

@@ -44,7 +44,7 @@ public class SeckillRequest {
      */
     private String failureReason;
     /**
-     * 预约时间
+     * 本请求预占库存时的活动代次
      */
     private Long reservationEpoch;
     /**

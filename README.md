@@ -34,12 +34,20 @@ SDK 默认不额外重试，未得到 `SEND_OK` 时向调用方报告失败或�
 调用方不能据此回补库存。发送组件本身只负责同步发送，可靠重试交给第二阶段的 Outbox。
 
 第二阶段已增加独立请求账本、按订单 Redis 预占、受理与待发消息同事务提交、
-租约领取及退避投递。新受理组件和 Outbox 调度默认关闭，现有 HTTP 下单仍走 Stream；
-正式订单消费者、周期恢复和补偿尚未实施，不能仅打开开关就切换业务链路。
+租约领取及退避投递。第二阶段交付时新组件默认关闭，后续消费者进度和当前联调配置见下文；
+周期恢复和补偿尚未实施，不能仅打开开关就切换业务链路。
 具体改动、事务顺序、Mermaid 流程和隔离测试见
 [订单 RocketMQ 第二阶段说明](docs/optimization/order/ROCKETMQ_PHASE2.md)。
 架构、数据库表职责、参考工程差异和复盘问题见
 [第二阶段图解与复盘](docs/optimization/order/ROCKETMQ_PHASE2_REVIEW.md)。
+
+第三阶段已实现独立订单消费者、数据库幂等建单、确认/释放任务登记、鉴权结果查询和前端进度展示，
+当前 YAML 为方便开发联调，默认开启可靠组件、独立 API、Outbox 和消费者；
+前端仍需显式设置 `VITE_RELIABLE_SECKILL_ENABLED=true`，旧 HTTP 入口保留 Stream。
+2026-10-25 已打通隔离环境的真实前后端与 MQ 建单链路，提交前完整后端回归 181 项全部通过；
+确认/释放执行器和正式切换仍待后续阶段。详见
+[订单 RocketMQ 第三阶段说明](docs/optimization/order/ROCKETMQ_PHASE3.md)。
+从创建新券开始测试可按 [购买联调指南](docs/optimization/order/ROCKETMQ_PURCHASE_TEST.md) 操作，包含 SQL、Redis 初始化和 HTTP 请求。
 
 独立收发验证在项目根目录执行，不启动 Spring Boot、MySQL、Redis 或订单落库逻辑：
 

@@ -77,14 +77,20 @@ hmdp:
     access-key: ${ROCKETMQ_ACCESS_KEY:}  # 访问密钥
     secret-key: ${ROCKETMQ_SECRET_KEY:}  # 密钥
     outbox:
-      # 第二阶段默认关闭，不扫描尚未执行迁移的业务库。
-      enabled: ${ORDER_OUTBOX_ENABLED:false}  # 是否开启 outbox
+      # 当前开发联调默认开启；需先执行订单相关表迁移。
+      enabled: ${ORDER_OUTBOX_ENABLED:true}  # 是否开启 outbox
       batch-size: ${ORDER_OUTBOX_BATCH_SIZE:20}  # 批量处理大小
       poll-interval-ms: ${ORDER_OUTBOX_POLL_INTERVAL_MS:1000}  # 轮询间隔
       lease-ms: ${ORDER_OUTBOX_LEASE_MS:30000}  # 租约时间
+    consumer:
+      enabled: ${ORDER_CONSUMER_ENABLED:true} # 当前开发联调启用建单消费者
+      group: ${ORDER_CONSUMER_GROUP:hmdp-seckill-order-create-cg}
+      threads: ${ORDER_CONSUMER_THREADS:4}
+      max-reconsume-times: ${ORDER_CONSUMER_MAX_RECONSUME_TIMES:16}
   seckill:
-    # 只注册新受理组件；当前 HTTP 入口仍走旧 Stream，不提供通道切换。
-    reliable-components-enabled: ${SECKILL_RELIABLE_COMPONENTS_ENABLED:false}  # 是否开启可靠组件
+    # 新组件和独立接口用于联调；原秒杀 HTTP 入口仍走旧 Stream。
+    reliable-components-enabled: ${SECKILL_RELIABLE_COMPONENTS_ENABLED:true}  # 是否开启可靠组件
+    reliable-api-enabled: ${SECKILL_RELIABLE_API_ENABLED:true} # 独立联调接口，不切换旧入口
     transaction-timeout-seconds: ${SECKILL_TRANSACTION_TIMEOUT_SECONDS:5}  # 事务超时秒数
   cache:
     # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。

@@ -2,6 +2,9 @@ package com.hmdp.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.infrastructure.mq.RocketMqOrderPublisher;
+import com.hmdp.infrastructure.mq.RocketMqOrderListener;
+import com.hmdp.service.ISeckillOrderService;
+import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.acl.common.AclClientRPCHook;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
 import org.junit.jupiter.api.Test;
@@ -17,8 +20,7 @@ import org.springframework.context.annotation.Import;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mockConstruction;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.*;
 
 class RocketMqConfigurationTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
@@ -33,6 +35,53 @@ class RocketMqConfigurationTest {
             includeFilters = @ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE,
                     classes = {RocketMqProperties.class, RocketMqOrderPublisher.class}))
     static class TestConfiguration {
+    }
+
+    /**
+     * 消费者启动前先检查唯一索引，并随 Spring 上下文关闭。
+     * @throws Exception MQ 客户端生命周期测试调用失败
+     */
+    @Test
+    void consumerVerifiesSchemaAndFollowsContextLifecycle() throws Exception {
+        ISeckillOrderService orders = mock(ISeckillOrderService.class);
+        RocketMqOrderListener listener = mock(RocketMqOrderListener.class);
+        AtomicReference<DefaultMQPushConsumer> client = new AtomicReference<>();
+        try (var producer = mockConstruction(DefaultMQProducer.class);
+             var consumer = mockConstruction(DefaultMQPushConsumer.class)) {
+            runner.withBean(OrderConsumerProperties.class, OrderConsumerProperties::new)
+                    .withBean(ISeckillOrderService.class, () -> orders)
+                    .withBean(RocketMqOrderListener.class, () -> listener)
+                    .withPropertyValues("hmdp.rocketmq.enabled=true", "hmdp.rocketmq.consumer.enabled=true",
+                            "hmdp.seckill.reliable-components-enabled=true")
+                    .run(context -> {
+                        assertThat(context).hasNotFailed();
+                        client.set(context.getBean(DefaultMQPushConsumer.class));
+                        verify(orders).verifySchema();
+                        verify(client.get()).setConsumeMessageBatchMaxSize(1);
+                        verify(client.get()).subscribe("hmdp-seckill-order-create", "CREATE_ORDER");
+                        verify(client.get()).registerMessageListener(listener);
+                        verify(client.get()).start();
+                    });
+            verify(client.get()).shutdown();
+            assertThat(consumer.constructed()).hasSize(1);
+        }
+    }
+
+    /** 未完成数据库唯一索引迁移时不得构造消费者。 */
+    @Test
+    void missingIndexBlocksConsumerBeforeConstruction() {
+        ISeckillOrderService orders = mock(ISeckillOrderService.class);
+        doThrow(new IllegalStateException("索引缺失")).when(orders).verifySchema();
+        try (var producer = mockConstruction(DefaultMQProducer.class);
+             var consumer = mockConstruction(DefaultMQPushConsumer.class)) {
+            runner.withBean(OrderConsumerProperties.class, OrderConsumerProperties::new)
+                    .withBean(ISeckillOrderService.class, () -> orders)
+                    .withBean(RocketMqOrderListener.class, () -> mock(RocketMqOrderListener.class))
+                    .withPropertyValues("hmdp.rocketmq.enabled=true", "hmdp.rocketmq.consumer.enabled=true",
+                            "hmdp.seckill.reliable-components-enabled=true")
+                    .run(context -> assertThat(context).hasFailed());
+            assertThat(consumer.constructed()).isEmpty();
+        }
     }
 
     @Test

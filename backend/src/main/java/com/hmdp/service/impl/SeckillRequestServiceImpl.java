@@ -6,6 +6,8 @@ import com.hmdp.config.SeckillOrderProperties;
 import com.hmdp.constants.SeckillRequestStatus;
 import com.hmdp.constants.SeckillReservationResult;
 import com.hmdp.dto.SeckillAcceptance;
+import com.hmdp.dto.SeckillRequestResult;
+import com.hmdp.constants.SeckillOrderFailureReason;
 import com.hmdp.entity.MqOutbox;
 import com.hmdp.entity.SeckillCampaignControl;
 import com.hmdp.entity.SeckillRequest;
@@ -55,6 +57,66 @@ public class SeckillRequestServiceImpl implements ISeckillRequestService {
     private final ObjectMapper objectMapper;
     private final PlatformTransactionManager transactionManager;
     private final SeckillOrderProperties properties;
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public SeckillRequestResult queryByOrder(Long userId, Long orderId) {
+        if (userId == null || userId < 1 || orderId == null || orderId < 1) {
+            throw new IllegalArgumentException("用户和订单编号必须为正数");
+        }
+        return queryResult(requests.findOwnedOrder(userId, orderId));
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public SeckillRequestResult queryByRequest(Long userId, String requestId) {
+        if (userId == null || userId < 1 || requestId == null || !requestId.matches("[A-Za-z0-9_-]{1,128}")) {
+            throw new IllegalArgumentException("用户或请求编号非法");
+        }
+        return queryResult(requests.findByRequest(userId, requestId));
+    }
+
+    /**
+     * 返回稳定英文标识和中文说明，不向接口暴露完整账本。
+     *
+     * @param request 请求账本，允许为 null
+     * @return 查询结果，账本不存在时为 null
+     */
+    private SeckillRequestResult queryResult(SeckillRequest request) {
+        if (request == null) {
+            return null;
+        }
+        return new SeckillRequestResult(request.getOrderId().toString(), request.getRequestId(),
+                request.getVoucherId().toString(), request.getStatus(), request.getStatus().getDescription(),
+                request.getFailureReason(), reasonDescription(request.getFailureReason()));
+    }
+
+    /**
+     * 把已知原因转为中文，未知历史原因不阻断查询。
+     *
+     * @param reason 英文原因标识，允许为 null
+     * @return 中文说明，无原因时为 null
+     */
+    private String reasonDescription(String reason) {
+        if (reason == null) {
+            return null;
+        }
+        try {
+            // 首先尝试解析预占结果
+            return SeckillReservationResult.valueOf(reason).getDescription();
+        } catch (IllegalArgumentException ignored) {
+            try {
+                // 尝试解析订单失败原因
+                return SeckillOrderFailureReason.valueOf(reason).getDescription();
+            } catch (IllegalArgumentException unknown) {
+                return "处理原因待核对";
+            }
+        }
+    }
 
     /**
      * 受理秒杀请求，确保订单创建前的数据库操作一致性和幂等性。

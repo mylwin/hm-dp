@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hmdp.infrastructure.mq.OrderOutboxDispatcher;
 import com.hmdp.infrastructure.mq.OrderOutboxJob;
 import com.hmdp.infrastructure.mq.RocketMqOrderPublisher;
+import com.hmdp.infrastructure.mq.RocketMqOrderListener;
+import com.hmdp.service.ISeckillOrderService;
+import com.hmdp.controller.SeckillRequestController;
 import com.hmdp.infrastructure.redis.RedisIdGenerator;
 import com.hmdp.infrastructure.seckill.SeckillReservationStore;
 import com.hmdp.mapper.MqOutboxMapper;
@@ -35,11 +38,13 @@ class OrderPipelineConfigurationTest {
             .withBean(StringRedisTemplate.class, () -> mock(StringRedisTemplate.class))
             .withBean(PlatformTransactionManager.class, () -> mock(PlatformTransactionManager.class))
             .withBean(RocketMqOrderPublisher.class, () -> mock(RocketMqOrderPublisher.class))
+            .withBean(ISeckillOrderService.class, () -> mock(ISeckillOrderService.class))
             .withBean(ObjectMapper.class, () -> new ObjectMapper().findAndRegisterModules());
 
     @Configuration(proxyBeanMethods = false)
     @Import({SeckillOrderProperties.class, OrderOutboxProperties.class, SeckillRequestServiceImpl.class,
-            SeckillReservationStore.class, OrderOutboxDispatcher.class, OrderOutboxJob.class})
+            SeckillReservationStore.class, OrderOutboxDispatcher.class, OrderOutboxJob.class,
+            RocketMqOrderListener.class, SeckillRequestController.class})
     static class PipelineConfiguration {
     }
 
@@ -51,6 +56,26 @@ class OrderPipelineConfigurationTest {
             assertThat(context).doesNotHaveBean(ISeckillRequestService.class);
             assertThat(context).doesNotHaveBean(OrderOutboxDispatcher.class);
             assertThat(context).doesNotHaveBean(OrderOutboxJob.class);
+            assertThat(context).doesNotHaveBean(RocketMqOrderListener.class);
+            assertThat(context).doesNotHaveBean(SeckillRequestController.class);
+        });
+    }
+
+    /** 新 API 和监听器都需要显式开关，不能只启用受理组件就暴露。 */
+    @Test
+    void newApiAndListenerRequireAllSwitches() {
+        runner.withPropertyValues("hmdp.seckill.reliable-components-enabled=true",
+                "hmdp.seckill.reliable-api-enabled=true", "hmdp.rocketmq.enabled=true",
+                "hmdp.rocketmq.consumer.enabled=true").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).hasSingleBean(RocketMqOrderListener.class);
+            assertThat(context).hasSingleBean(SeckillRequestController.class);
+        });
+        runner.withPropertyValues("hmdp.seckill.reliable-api-enabled=true",
+                "hmdp.rocketmq.enabled=true", "hmdp.rocketmq.consumer.enabled=true").run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).doesNotHaveBean(RocketMqOrderListener.class);
+            assertThat(context).doesNotHaveBean(SeckillRequestController.class);
         });
     }
 

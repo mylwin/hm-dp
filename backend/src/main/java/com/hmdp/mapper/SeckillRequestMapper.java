@@ -4,7 +4,7 @@ import com.hmdp.entity.SeckillRequest;
 import org.apache.ibatis.annotations.*;
 
 /**
- * 请求账本读写；状态更新必须由调用方置于受理事务内。
+ * 请求账本读写；状态更新必须放在对应业务事务内。
  *
  * @author myl
  */
@@ -34,6 +34,16 @@ public interface SeckillRequestMapper {
     @Select("SELECT * FROM tb_seckill_request WHERE user_id = #{userId} AND request_id = #{requestId}")
     @Options(timeout = 5)
     SeckillRequest findByRequest(@Param("userId") Long userId, @Param("requestId") String requestId);
+
+    /**
+     * 读取当前用户自己的请求。
+     * @param userId 当前用户编号
+     * @param orderId 订单编号
+     * @return 请求账本，不存在或不属于当前用户时返回 null
+     */
+    @Select("SELECT * FROM tb_seckill_request WHERE user_id = #{userId} AND order_id = #{orderId}")
+    @Options(timeout = 5)
+    SeckillRequest findOwnedOrder(@Param("userId") Long userId, @Param("orderId") Long orderId);
 
     /**
      * 锁定请求最新状态；已有锁冲突立即失败，调用方保留原请求供重试。
@@ -72,4 +82,29 @@ public interface SeckillRequestMapper {
             """)
     @Options(timeout = 5)
     int markRejected(@Param("orderId") Long orderId, @Param("reason") String reason);
+
+    /**
+     * 标记建单成功，与订单、库存和确认任务一起提交。
+     * @param orderId 已锁定的订单编号
+     * @return 更新行数，应为 1
+     */
+    @Update("""
+            UPDATE tb_seckill_request SET status = 'SUCCEEDED', failure_reason = NULL, updated_at = UTC_TIMESTAMP(3)
+            WHERE order_id = #{orderId} AND status = 'ACCEPTED'
+            """)
+    @Options(timeout = 5)
+    int markSucceeded(Long orderId);
+
+    /**
+     * 关闭无法建单的请求，需同时登记释放任务。
+     * @param orderId 已锁定的订单编号
+     * @param reason 关闭原因标识
+     * @return 更新行数，应为 1
+     */
+    @Update("""
+            UPDATE tb_seckill_request SET status = 'CLOSED', failure_reason = #{reason}, updated_at = UTC_TIMESTAMP(3)
+            WHERE order_id = #{orderId} AND status = 'ACCEPTED'
+            """)
+    @Options(timeout = 5)
+    int markClosed(@Param("orderId") Long orderId, @Param("reason") String reason);
 }
