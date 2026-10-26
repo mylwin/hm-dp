@@ -16,6 +16,75 @@
 
 包职责、文件迁移对照和保留代码说明见 [项目结构说明](docs/architecture/STRUCTURE.md)。
 
+## 当前秒杀入口：新链路
+
+普通券已补充直接数据库购买：上架普通券点击“立即购买”，确认后创建未支付订单，重复购买返回已有编号。
+接口及限制见 [普通券购买说明](docs/architecture/ORDINARY_VOUCHER_PURCHASE.md)。
+
+理解整体业务先读 [RocketMQ 秒杀订单总设计](docs/architecture/ROCKETMQ_ORDER_DESIGN.md)：
+按发券、受理、建单、收尾和恢复解释数据库、Redis、状态、流程时序及并发场景，无需按五个阶段逐份拼接。
+
+当前 React 页面固定使用 `/voucher-order/reliable`，旧 Controller 和旧 Stream 消费者已停止注册，
+旧代码与历史数据保留。新券通过 `POST /voucher/seckill` 自动准备 Redis 后开放购买。
+API 实例启动会检查新管道开关完整性；`SECKILL_ACCEPTING_REQUESTS=false` 可暂停提交，原请求查询和后台收尾继续。
+第四阶段及规则已提交为 `58ba8cdd`；本轮第五阶段实现、验证范围与后续故障演练见
+[第五阶段说明](docs/optimization/order/ROCKETMQ_PHASE5.md)。以下阶段记录保留交付时的背景。
+
+## 订单 RocketMQ 改造：第一阶段
+
+本阶段接入原生 RocketMQ 5.3.2 客户端，提供订单事件的同步发送入口、
+Spring 客户端生命周期管理和独立收发测试。第一阶段交付时秒杀业务仍使用原 Redis Stream，
+尚未切换订单消费者；点赞、评论、关注和博客推送不在本次改造范围。
+后续依次实现请求账本与 MySQL Outbox、幂等建单与结果查询、补偿对账及迁移。
+
+已只读确认虚拟机 `10.211.55.9` 的 Broker 为 5.3.2，NameServer 为
+`10.211.55.9:9876`，Broker 注册地址为 `10.211.55.9:10911`，ACL 未开启。
+无需在本机 Compose 中重复部署 RocketMQ，也无需新增 Tomcat。
+
+当前配置默认启用客户端，设置 `ROCKETMQ_ENABLED=false` 可关闭；启用时在后端启动阶段创建生产者。
+此开关只控制客户端初始化，不改变秒杀通道，也不代表连接已经通过收发验证。
+配置入口为 `hmdp.rocketmq`，地址通过 `ROCKETMQ_NAMESERVER` 覆盖。
+SDK 默认不额外重试，未得到 `SEND_OK` 时向调用方报告失败或结果未知，
+调用方不能据此回补库存。发送组件本身只负责同步发送，可靠重试交给第二阶段的 Outbox。
+
+第二阶段已增加独立请求账本、按订单 Redis 预占、受理与待发消息同事务提交、
+租约领取及退避投递。第二阶段交付时新组件默认关闭，后续消费者进度和当前联调配置见下文；
+周期恢复和补偿尚未实施，不能仅打开开关就切换业务链路。
+具体改动、事务顺序、Mermaid 流程和隔离测试见
+[订单 RocketMQ 第二阶段说明](docs/optimization/order/ROCKETMQ_PHASE2.md)。
+架构、数据库表职责、参考工程差异和复盘问题见
+[第二阶段图解与复盘](docs/optimization/order/ROCKETMQ_PHASE2_REVIEW.md)。
+
+第三阶段已实现独立订单消费者、数据库幂等建单、确认/释放任务登记、鉴权结果查询和前端进度展示，
+第三阶段 YAML 为方便开发联调，默认开启可靠组件、独立 API、Outbox 和消费者；
+当时前端需显式设置 `VITE_RELIABLE_SECKILL_ENABLED=true`，旧 HTTP 入口保留 Stream。
+2026-10-25 已打通隔离环境的真实前后端与 MQ 建单链路，提交前完整后端回归 181 项全部通过；
+确认/释放执行器和正式切换仍待后续阶段。详见
+[订单 RocketMQ 第三阶段说明](docs/optimization/order/ROCKETMQ_PHASE3.md)。
+从创建新券开始测试可按 [购买联调指南](docs/optimization/order/ROCKETMQ_PURCHASE_TEST.md) 操作，包含 SQL、Redis 初始化和 HTTP 请求。
+
+第四阶段已补齐新券自动发布、预占确认/释放、后台恢复、非法消息与死信隔离、日志告警及受控重投，待联合验收。
+启用前先执行第四阶段两份数据库迁移；运维接口默认关闭。当前实现、测试和验收步骤见
+[第四阶段完整说明](docs/optimization/order/ROCKETMQ_PHASE4.md)。早期计划将旧 Stream 排空安排在第五阶段；
+现按用户要求只启用新路径，不再实施旧链路维护，具体以第五阶段说明为准。
+
+独立收发验证在项目根目录执行，不启动 Spring Boot、MySQL、Redis 或订单落库逻辑：
+
+```bash
+ROCKETMQ_SMOKE_TEST=true mvn -f backend/pom.xml -Dtest=RocketMqSmokeIT test
+```
+
+验证仅向 `hmdp-order-smoke` 发送一条合成事件，并使用独立临时消费组接收；
+不会向业务订单 Topic 投递。首次运行需在 Broker 预建测试 Topic，
+或由开发环境的 `autoCreateTopicEnable=true` 自动创建。
+普通单元测试不会执行该测试，需同时指定测试类和环境开关。
+若以后开启 ACL，通过 `ROCKETMQ_ACCESS_KEY`、`ROCKETMQ_SECRET_KEY` 配置，勿提交密钥。
+客户端文件日志默认由 SDK 写入用户日志目录，可用 JVM 参数
+`-Drocketmq.log.root=/absolute/path/to/logs` 指定位置。
+
+阶段范围、配置、测试结果和后续任务见
+[订单 RocketMQ 第一阶段说明](docs/optimization/order/ROCKETMQ_PHASE1.md)。
+
 ## 商铺详情缓存回源并发
 
 商铺详情的互斥缓存查询在锁内二次检查缓存后，才申请数据库回源许可。
@@ -110,8 +179,8 @@ docker compose up -d --wait
 首次运行会下载 MySQL 8.4、Redis 7.4 镜像，并等待两个服务健康后返回。
 MySQL 首次创建空数据卷时会自动创建 `hm-dp` 数据库，并导入
 `backend/src/main/resources/db/hmdp.sql` 中的表和示例数据。
-Redis 启用 AOF 持久化；健康检查会幂等创建后端需要的
-`hmdp:stream:orders` Stream 和 `g1` 消费组，从 `0` 开始读取，已有消费进度不会被重置。
+Redis 启用 AOF 持久化；健康检查只检测 PING，不再创建旧订单 Stream 或消费组。
+已存在的旧 Stream、消费组和消息保留，不自动迁移或删除。
 仅启动这两个容器，不额外启动初始化容器。
 
 ## 本地连接

@@ -1,6 +1,6 @@
 package com.hmdp.infrastructure.redis;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +15,7 @@ import java.time.format.DateTimeFormatter;
  * @since 2026-06-20
  */
 @Component
+@RequiredArgsConstructor
 public class RedisIdGenerator {
     /**
      * 起始的时间戳（2022-09-01）
@@ -26,8 +27,7 @@ public class RedisIdGenerator {
      */
     private static final int ID_BITS = 32;
 
-    @Autowired
-    private StringRedisTemplate stringRedisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
 
     /**
      * 全局唯一id生成器，基于redis的自增长功能，实现高并发下唯一id的生成

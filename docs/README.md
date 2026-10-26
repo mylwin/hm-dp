@@ -6,6 +6,22 @@
 ## 项目优化
 
 - [项目优化建议](项目优化建议.md)
+- [RocketMQ 秒杀订单迁移方案（设计与验收计划）](plan/rocketmq-seckill-design.md)
+
+### 订单优化
+
+- [先读总设计：完整业务、状态设计、数据库、Redis、流程时序与 44 个并发故障场景](architecture/ROCKETMQ_ORDER_DESIGN.md)
+- [订单 RocketMQ 第一阶段：客户端接入与收发验证](optimization/order/ROCKETMQ_PHASE1.md)
+- [订单 RocketMQ 第二阶段：可靠受理、预占与 Outbox](optimization/order/ROCKETMQ_PHASE2.md)
+- [订单 RocketMQ 第二阶段图解与复盘：参考来源、架构、表职责、Redis 键值示例与故障恢复](optimization/order/ROCKETMQ_PHASE2_REVIEW.md)
+- [订单 RocketMQ 第二阶段：数据设定、事务级别与并发边界](optimization/order/ROCKETMQ_PHASE2_TRANSACTIONS.md)
+- [订单 RocketMQ 第三阶段：幂等建单、结果查询与真实前后端联调（含 PREPARING 停留定位）](optimization/order/ROCKETMQ_PHASE3.md)
+- [订单 RocketMQ 第四阶段第 1 步：新秒杀券自动发布与原券初始化重试](optimization/order/ROCKETMQ_PHASE4_1.md)
+- [订单 RocketMQ 第四阶段：自动发布、预占补偿、请求恢复、死信隔离与联合验收](optimization/order/ROCKETMQ_PHASE4.md)
+- [订单 RocketMQ 第四阶段流程图解：16 个独立 Mermaid 流程](optimization/order/ROCKETMQ_PHASE4_FLOWS.md)
+- [订单 RocketMQ 第四阶段新增 Lua：初始化、确认释放和预占核对 Mermaid 图](optimization/order/ROCKETMQ_PHASE4_LUA_FLOWS.md)
+- [订单 RocketMQ 第五阶段：新路径启用、暂停提交与故障并发验收](optimization/order/ROCKETMQ_PHASE5.md)
+- [创建测试券并从购买验证 MQ 建单（含 SQL、Redis 初始化及 HTTP 请求）](optimization/order/ROCKETMQ_PURCHASE_TEST.md)
 
 ### 缓存优化
 
@@ -18,6 +34,8 @@
 
 ## 架构与项目结构
 
+- [普通优惠券购买：直接数据库建单、重复提交与验证边界](architecture/ORDINARY_VOUCHER_PURCHASE.md)
+- [RocketMQ 秒杀订单整体设计](architecture/ROCKETMQ_ORDER_DESIGN.md)
 - [项目结构与文件迁移对照](architecture/STRUCTURE.md)
 - [项目架构说明](项目架构说明.md)
 - [项目架构源文件](项目架构.drawio)
@@ -26,6 +44,7 @@
 ## 前端
 
 - [前端开发、接口与部署说明](frontend/README.md)
+- [秒杀维护页：本地开关、运维接口和验证说明](frontend/SECKILL_MAINTENANCE.md)
 - [页面迁移与接口覆盖](frontend/MIGRATION.md)
 - [图片与图标来源](frontend/ASSETS.md)
 

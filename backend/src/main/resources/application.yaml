@@ -39,6 +39,10 @@ spring:
       host: ${REDIS_HOST:127.0.0.1}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:20041223}
+      # 受理事务持有请求行锁时调用 Redis，限制连接与单次命令等待时间。
+      connect-timeout: 2s
+      # 受理短事务调用 Redis，限制命令等待时间；网络失败保留请求账本供恢复。
+      timeout: 3s
       lettuce:
         pool:
           max-active: 10
@@ -61,6 +65,47 @@ aliyun:
     bucket-name: ${dev.bucket-name}  # 桶名
 
 hmdp:
+  rocketmq:
+    # 新链路通过数据库 Outbox 投递订单事件，旧 Stream 消费者不再注册。
+    enabled: ${ROCKETMQ_ENABLED:true}
+    name-server: ${ROCKETMQ_NAMESERVER:10.211.55.9:9876}  # NameServer服务器地址
+    producer-group: ${ROCKETMQ_PRODUCER_GROUP:hmdp-order-producer}    # 生产者组
+    order-topic: ${ROCKETMQ_ORDER_TOPIC:hmdp-seckill-order-create}  # 订单主题
+    send-timeout: ${ROCKETMQ_SEND_TIMEOUT:3s}  # 发送超时
+    send-retries: ${ROCKETMQ_SEND_RETRIES:0}  # 发送重试次数
+    vip-channel-enabled: ${ROCKETMQ_VIP_CHANNEL_ENABLED:false}  # 是否启用VIP通道
+    access-key: ${ROCKETMQ_ACCESS_KEY:}  # 访问密钥
+    secret-key: ${ROCKETMQ_SECRET_KEY:}  # 密钥
+    outbox:
+      # 当前开发联调默认开启；需先执行订单相关表迁移。
+      enabled: ${ORDER_OUTBOX_ENABLED:true}  # 是否开启 outbox
+      batch-size: ${ORDER_OUTBOX_BATCH_SIZE:20}  # 批量处理大小
+      poll-interval-ms: ${ORDER_OUTBOX_POLL_INTERVAL_MS:1000}  # 轮询间隔
+      lease-ms: ${ORDER_OUTBOX_LEASE_MS:30000}  # 租约时间
+    consumer:
+      enabled: ${ORDER_CONSUMER_ENABLED:true} # 当前开发联调启用建单消费者
+      group: ${ORDER_CONSUMER_GROUP:hmdp-seckill-order-create-cg}
+      threads: ${ORDER_CONSUMER_THREADS:4}
+      max-reconsume-times: ${ORDER_CONSUMER_MAX_RECONSUME_TIMES:16}
+      dead-letter-enabled: ${ORDER_DEAD_LETTER_ENABLED:true} # 当前组死信持久化隔离
+      dead-letter-group: ${ORDER_DEAD_LETTER_GROUP:hmdp-seckill-order-dlq-cg}
+  seckill:
+    # 唯一抢购入口为 /voucher-order/reliable，使用前须完成订单表和索引迁移。
+    reliable-components-enabled: ${SECKILL_RELIABLE_COMPONENTS_ENABLED:true}  # 是否开启可靠组件
+    reliable-api-enabled: ${SECKILL_RELIABLE_API_ENABLED:true}
+    accepting-requests: ${SECKILL_ACCEPTING_REQUESTS:true} # 仅暂停提交，结果查询和后台任务继续
+    transaction-timeout-seconds: ${SECKILL_TRANSACTION_TIMEOUT_SECONDS:5}  # 事务超时秒数
+    maintenance:
+      enabled: ${SECKILL_MAINTENANCE_ENABLED:true} # 启用前先执行第四阶段两份迁移
+      operations-enabled: ${SECKILL_OPERATIONS_ENABLED:false}  # 是否开放秒杀运维接口；调用时须登录并携带独立运维令牌
+      operations-token: ${SECKILL_OPERATIONS_TOKEN:}  # 独立运维令牌，开启运维接口时须配置至少 32 个字符
+      batch-size: ${SECKILL_MAINTENANCE_BATCH_SIZE:20}  # 单轮上限：确认与释放任务合计领取数、待发布活动检查数、停滞请求检查数分别受限
+      poll-interval-ms: ${SECKILL_MAINTENANCE_INTERVAL_MS:5000}  # 确认释放与发布恢复、请求恢复各轮执行结束后的等待时间，单位毫秒
+      stale-seconds: ${SECKILL_RECOVERY_STALE_SECONDS:60}  # PREPARING/ACCEPTED 请求无进展达到此秒数后检查，不会仅因超时自动关闭
+      recovery-retry-seconds: ${SECKILL_RECOVERY_RETRY_SECONDS:60}  # 同一活动或请求两次恢复尝试之间的最短等待时间，单位秒
+      lease-ms: ${SECKILL_MAINTENANCE_LEASE_MS:30000}  # 确认或释放任务领取后的独占执行时限，单位毫秒；到期可由其他执行者接管
+      alert-age-seconds: ${SECKILL_ALERT_AGE_SECONDS:120}  # 未完成任务、请求或待发布活动的最老等待时间达到此秒数时输出告警日志
+      alert-attempts: ${SECKILL_ALERT_ATTEMPTS:10}  # 未完成 Outbox 事件的领取次数达到此值时输出告警日志，仍保留重试
   cache:
     # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。
     max-concurrent-fallbacks: ${CACHE_MAX_CONCURRENT_FALLBACKS:10}

@@ -6,6 +6,7 @@ import { AppProvider } from './app-context';
 import { Layout } from './components/layout';
 import { Empty } from './components/ui';
 import Home from './pages/home';
+import { seckillOpsEnabled } from './lib/local-tools';
 import './styles.css';
 import './community.css';
 
@@ -15,6 +16,7 @@ const Stories = lazy(() => import('./pages/stories'));
 const StoryDetail = lazy(() => import('./pages/story-detail'));
 const StoryEditor = lazy(() => import('./pages/story-editor'));
 const Profile = lazy(() => import('./pages/profile'));
+const SeckillMaintenance = seckillOpsEnabled ? lazy(() => import('./pages/seckill-maintenance')) : null;
 function HomePage() { useEffect(() => { document.title = '黑马点评 · 发现生活的好去处'; }, []); return <Home />; }
 
 createRoot(document.getElementById('root')!).render(
@@ -27,6 +29,7 @@ createRoot(document.getElementById('root')!).render(
     <Route path="stories/:id" element={<StoryDetail />} />
     <Route path="account" element={<Profile />} />
     <Route path="people/:id" element={<Profile />} />
+    {SeckillMaintenance && <Route path="local/seckill" element={<SeckillMaintenance />} />}
     <Route path="*" element={<div className="container"><Empty title="这个页面暂时找不到了" description="回到首页，继续发现好生活。"><Link className="button primary" to="/">返回首页</Link></Empty></div>} />
   </Route></Routes></AppProvider></BrowserRouter></IconContext.Provider></StrictMode>,
 );

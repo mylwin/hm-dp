@@ -201,7 +201,7 @@ return redisson.getReadWriteLock(SHOP_BLOOM_LIFECYCLE_LOCK).readLock();
 - `ShopControllerTest`：新增验证接口调用 `createShop`，不绕过同步入口直接保存。
 - `ShopBloomFilterTest`：补充同步成功、同步异常、未就绪、旧协议失效及读写锁共用名称的验证。
 - `RedisCacheClientTest`：调整新锁名预期，验证资源内容保留、自定义键兼容和非法输入。
-- 根目录 `README.md` 更新当前阶段入口；本文件保存完整业务说明，`.AGENT.md` 固化阶段讲解要求。
+- 根目录 `README.md` 更新当前阶段入口；本文件保存完整业务说明，`../../../AGENTS.md` 固化阶段讲解要求。
 
 ## 新增顺序
 
