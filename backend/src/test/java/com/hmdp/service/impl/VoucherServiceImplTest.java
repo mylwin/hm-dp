@@ -4,10 +4,15 @@ import com.hmdp.config.SeckillOrderProperties;
 import com.hmdp.entity.SeckillCampaignControl;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.Voucher;
+import com.hmdp.entity.VoucherOrder;
+import com.hmdp.mapper.VoucherMapper;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.mockito.ArgumentCaptor;
 import com.hmdp.exception.SeckillCampaignPublicationPendingException;
 import com.hmdp.infrastructure.seckill.SeckillReservationStore;
 import com.hmdp.mapper.SeckillCampaignControlMapper;
 import com.hmdp.service.ISeckillVoucherService;
+import com.hmdp.mapper.VoucherOrderMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
@@ -32,6 +37,8 @@ class VoucherServiceImplTest {
     @SuppressWarnings("unchecked")
     private final ObjectProvider<SeckillReservationStore> provider = mock(ObjectProvider.class);
     private final PlatformTransactionManager manager = mock(PlatformTransactionManager.class);
+    private final VoucherMapper ordinaryVouchers = mock(VoucherMapper.class);
+    private final VoucherOrderMapper voucherOrders = mock(VoucherOrderMapper.class);
     private final SeckillOrderProperties properties = new SeckillOrderProperties();
     private final LocalDateTime begin = LocalDateTime.of(2026, 10, 25, 0, 0);
     private VoucherServiceImpl service;
@@ -44,7 +51,8 @@ class VoucherServiceImplTest {
         properties.setReliableComponentsEnabled(true);
         when(provider.getIfAvailable()).thenReturn(store);
         when(manager.getTransaction(any())).thenAnswer(call -> new SimpleTransactionStatus());
-        service = spy(new VoucherServiceImpl(vouchers, redis, campaigns, provider, manager, properties));
+        service = spy(new VoucherServiceImpl(vouchers, redis, campaigns, provider, manager, properties, voucherOrders));
+        ReflectionTestUtils.setField(service, "baseMapper", ordinaryVouchers);
         doAnswer(call -> { ((Voucher) call.getArgument(0)).setId(30L); return true; })
                 .when(service).save(any(Voucher.class));
         when(vouchers.save(any())).thenReturn(true);
@@ -57,6 +65,62 @@ class VoucherServiceImplTest {
         campaign.setPublicationStatus("PENDING");
         when(campaigns.lockExclusive(30L)).thenReturn(campaign);
         voucher = new Voucher().setStock(10).setBeginTime(begin).setEndTime(begin.plusDays(1));
+    }
+
+    /** 普通券购买在券锁内查重和插单，返回字符串编号，整个购买不调用 Redis 或秒杀服务。 */
+    @Test
+    void ordinaryPurchaseCreatesOrderBeforeCommit() {
+        when(ordinaryVouchers.lockForPurchase(1L)).thenReturn(new Voucher().setId(1L).setType(0).setStatus(1));
+        when(voucherOrders.insert(any(VoucherOrder.class))).thenReturn(1);
+        var purchaseResult = service.purchaseVoucher(7L, 1L);
+        assertThat(purchaseResult.getSuccess()).isTrue();
+        assertThat(purchaseResult.getData()).isInstanceOf(String.class);
+        ArgumentCaptor<VoucherOrder> insertedOrder = ArgumentCaptor.forClass(VoucherOrder.class);
+        var purchaseSequence = inOrder(ordinaryVouchers, voucherOrders, manager);
+        purchaseSequence.verify(ordinaryVouchers).lockForPurchase(1L);
+        purchaseSequence.verify(voucherOrders).findUserVoucherOrder(7L, 1L);
+        purchaseSequence.verify(voucherOrders).insert(insertedOrder.capture());
+        purchaseSequence.verify(manager).commit(any());
+        assertThat(insertedOrder.getValue().getUserId()).isEqualTo(7L);
+        assertThat(insertedOrder.getValue().getVoucherId()).isEqualTo(1L);
+        assertThat(insertedOrder.getValue().getId().toString()).isEqualTo(purchaseResult.getData());
+        verifyNoInteractions(redis, campaigns, vouchers, provider, store);
+    }
+
+    /** 已有普通券订单直接找回，下架也不阻止返回原编号，不重置已有订单状态。 */
+    @Test
+    void ordinaryRetryReturnsOriginalOrder() {
+        when(ordinaryVouchers.lockForPurchase(1L)).thenReturn(new Voucher().setId(1L).setType(0).setStatus(2));
+        VoucherOrder existingOrder = new VoucherOrder().setId(90001L).setUserId(7L).setVoucherId(1L).setStatus(2);
+        when(voucherOrders.findUserVoucherOrder(7L, 1L)).thenReturn(existingOrder);
+        assertThat(service.purchaseVoucher(7L, 1L).getData()).isEqualTo("90001");
+        assertThat(existingOrder.getStatus()).isEqualTo(2);
+        verify(voucherOrders, never()).insert(any(VoucherOrder.class));
+        verifyNoInteractions(redis, campaigns, vouchers, provider, store);
+    }
+
+    /** 普通入口拒绝非法编号、不存在、秒杀和未上架券，不产生订单。 */
+    @Test
+    void ordinaryPurchaseRejectsIneligibleVouchers() {
+        assertThatThrownBy(() -> service.purchaseVoucher(null, 1L)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.purchaseVoucher(7L, 0L)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(service.purchaseVoucher(7L, 1L).getSuccess()).isFalse();
+        when(ordinaryVouchers.lockForPurchase(1L)).thenReturn(new Voucher().setId(1L).setType(1).setStatus(1));
+        assertThat(service.purchaseVoucher(7L, 1L).getSuccess()).isFalse();
+        when(ordinaryVouchers.lockForPurchase(1L)).thenReturn(new Voucher().setId(1L).setType(0).setStatus(2));
+        assertThat(service.purchaseVoucher(7L, 1L).getSuccess()).isFalse();
+        verify(voucherOrders, never()).insert(any(VoucherOrder.class));
+        verifyNoInteractions(redis, campaigns, vouchers, provider, store);
+    }
+
+    /** 插单没有写入一行时返回异常并回滚事务，不能给页面返回虚假的订单成功。 */
+    @Test
+    void ordinaryInsertFailureRollsBackTransaction() {
+        when(ordinaryVouchers.lockForPurchase(1L)).thenReturn(new Voucher().setId(1L).setType(0).setStatus(1));
+        when(voucherOrders.insert(any(VoucherOrder.class))).thenReturn(0);
+        assertThatThrownBy(() -> service.purchaseVoucher(7L, 1L)).isInstanceOf(IllegalStateException.class);
+        verify(manager).rollback(any());
+        verify(manager, never()).commit(any());
     }
 
     /** 新券及暂停控制行先提交，再在排他锁内准备 Redis 和提交 READY。 */

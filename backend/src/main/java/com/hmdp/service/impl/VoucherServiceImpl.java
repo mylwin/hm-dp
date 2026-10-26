@@ -1,15 +1,18 @@
 package com.hmdp.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.hmdp.dto.Result;
 import com.hmdp.config.SeckillOrderProperties;
 import com.hmdp.entity.SeckillCampaignControl;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.Voucher;
+import com.hmdp.entity.VoucherOrder;
 import com.hmdp.exception.SeckillCampaignPublicationPendingException;
 import com.hmdp.infrastructure.seckill.SeckillReservationStore;
 import com.hmdp.mapper.SeckillCampaignControlMapper;
 import com.hmdp.mapper.VoucherMapper;
+import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherService;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +46,31 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     private final ObjectProvider<SeckillReservationStore> reservationStores;
     private final PlatformTransactionManager transactionManager;
     private final SeckillOrderProperties properties;
+    private final VoucherOrderMapper voucherOrders;
+
+    /** {@inheritDoc} */
+    @Override
+    public Result purchaseVoucher(Long userId, Long voucherId) {
+        if (userId == null || userId < 1 || voucherId == null || voucherId < 1) {
+            throw new IllegalArgumentException("用户和券编号必须为正数");
+        }
+        requireStandaloneCall();
+        return transaction().execute(status -> {
+            Voucher voucher = getBaseMapper().lockForPurchase(voucherId);
+            if (voucher == null) return Result.fail("优惠券不存在");
+            if (!Integer.valueOf(0).equals(voucher.getType())) {
+                return Result.fail("该优惠券不是普通券，请使用秒杀抢购入口");
+            }
+            // 券锁覆盖查重、插入和提交；响应丢失后的重试即使遇到下架，也能找回原订单。
+            VoucherOrder existingOrder = voucherOrders.findUserVoucherOrder(userId, voucherId);
+            if (existingOrder != null) return Result.ok(existingOrder.getId().toString());
+            if (!Integer.valueOf(1).equals(voucher.getStatus())) return Result.fail("优惠券暂不可购买");
+            // 使用 MyBatis-Plus 本地编号生成器，普通购买不调用 Redis ID 或秒杀预占组件。
+            VoucherOrder newOrder = new VoucherOrder().setId(IdWorker.getId()).setUserId(userId).setVoucherId(voucherId);
+            if (voucherOrders.insert(newOrder) != 1) throw new IllegalStateException("普通券订单保存失败");
+            return Result.ok(newOrder.getId().toString());
+        });
+    }
 
     /**
      * {@inheritDoc}
@@ -177,27 +205,27 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     }
 
     /**
-     * 在开始创建券或初始化活动前，拒绝已有外层数据库事务和已中断线程。
-     * 避免调用方误认为自己的回滚能撤销已经独立提交的新券或已经写入的 Redis 数据。
+     * 在开始购券、创建券或初始化活动前，拒绝已有外层数据库事务和已中断线程。
+     * 避免调用方误认为自己的回滚能撤销已经独立提交的订单、新券或已经写入的 Redis 数据。
      *
      * @throws IllegalStateException 当前已有数据库事务或线程中断标记为 true
      */
     private void requireStandaloneCall() {
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
-            throw new IllegalStateException("秒杀发券和活动初始化不能从已有事务内调用");
+            throw new IllegalStateException("购券、发券和活动初始化不能从已有事务内调用");
         }
         requireUninterrupted();
     }
 
     /**
-     * 检查当前线程是否已被要求停止，已中断时阻止继续写数据库 READY。
-     * 保留中断标记；若 Redis 已准备好，仍需沿用原券编号再次核对，不在这里自动重试。
+     * 检查当前线程是否已被要求停止，已中断时拒绝开始购券或继续发布活动。
+     * 保留中断标记；若发布期间 Redis 已准备好，仍需沿用原券编号核对，不在这里自动重试。
      *
      * @throws IllegalStateException 线程中断标记为 true
      */
     private void requireUninterrupted() {
         if (Thread.currentThread().isInterrupted()) {
-            throw new IllegalStateException("活动发布线程已中断，请沿用原券编号重试");
+            throw new IllegalStateException("优惠券业务线程已中断，请核对原订单或原券后重试");
         }
     }
 
@@ -248,8 +276,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     }
 
     /**
-     * 创建独立的券创建或活动发布事务，使用读已提交隔离级别和配置的秒级超时。
-     * 创建券与开放活动分两次执行；发布阶段取得的活动锁直到对应事务提交或回滚才释放。
+     * 创建独立的购券、券创建或活动发布事务，使用读已提交隔离级别和配置的秒级超时。
+     * 普通购买的券锁、活动发布的控制行锁均持有至对应事务提交或回滚；发券与开放仍分两次执行。
      *
      * @return REQUIRES_NEW、READ_COMMITTED 事务模板，尚未开始执行
      */

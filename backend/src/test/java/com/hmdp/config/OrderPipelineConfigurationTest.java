@@ -18,6 +18,7 @@ import com.hmdp.mapper.MqOutboxMapper;
 import com.hmdp.mapper.SeckillCampaignControlMapper;
 import com.hmdp.mapper.SeckillRequestMapper;
 import com.hmdp.mapper.VoucherMapper;
+import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherService;
 import com.hmdp.service.ISeckillRequestService;
@@ -42,6 +43,7 @@ class OrderPipelineConfigurationTest {
             .withUserConfiguration(PipelineConfiguration.class)
             .withBean(SeckillRequestMapper.class, () -> mock(SeckillRequestMapper.class))
             .withBean(VoucherMapper.class, () -> mock(VoucherMapper.class))
+            .withBean(VoucherOrderMapper.class, () -> mock(VoucherOrderMapper.class))
             .withBean(ISeckillVoucherService.class, () -> mock(ISeckillVoucherService.class))
             .withBean(SeckillCampaignControlMapper.class, () -> mock(SeckillCampaignControlMapper.class))
             .withBean(MqOutboxMapper.class, () -> mock(MqOutboxMapper.class))

@@ -5,7 +5,10 @@ import com.hmdp.dto.Result;
 import com.hmdp.entity.Voucher;
 import com.hmdp.exception.SeckillCampaignPublicationPendingException;
 import com.hmdp.service.IVoucherService;
+import com.hmdp.dto.UserDTO;
+import com.hmdp.security.UserContext;
 import jakarta.annotation.Resource;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 
@@ -21,6 +24,23 @@ public class VoucherController {
 
     @Resource
     private IVoucherService voucherService;
+
+    /**
+     * 为当前登录用户购买普通券，首次创建未支付订单，重复提交找回已有订单号，不接受正文伪造用户编号。
+     *
+     * @param voucherId 要购买的正数普通券编号
+     * @return 成功时返回字符串订单号；未登录为 401，编号非法为 400，业务不允许时 success=false
+     */
+    @PostMapping("/{voucherId}/purchase")
+    public ResponseEntity<Result> purchaseVoucher(@PathVariable("voucherId") Long voucherId) {
+        UserDTO currentUser = UserContext.getUser();
+        if (currentUser == null) return ResponseEntity.status(401).body(Result.fail("请先登录"));
+        try {
+            return ResponseEntity.ok(voucherService.purchaseVoucher(currentUser.getId(), voucherId));
+        } catch (IllegalArgumentException invalid) {
+            return ResponseEntity.badRequest().body(Result.fail(invalid.getMessage()));
+        }
+    }
 
     /**
      * 新增普通券

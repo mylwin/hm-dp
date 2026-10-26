@@ -34,6 +34,7 @@
 
 ## 架构与项目结构
 
+- [普通优惠券购买：直接数据库建单、重复提交与验证边界](architecture/ORDINARY_VOUCHER_PURCHASE.md)
 - [RocketMQ 秒杀订单整体设计](architecture/ROCKETMQ_ORDER_DESIGN.md)
 - [项目结构与文件迁移对照](architecture/STRUCTURE.md)
 - [项目架构说明](项目架构说明.md)

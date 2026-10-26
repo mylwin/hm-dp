@@ -442,7 +442,7 @@ class SeckillOutboxIT {
         SeckillOrderProperties properties = new SeckillOrderProperties();
         properties.setReliableComponentsEnabled(true);
         VoucherServiceImpl publisher = new VoucherServiceImpl(stockService, redis, controls,
-                beans.getBeanProvider(SeckillReservationStore.class), manager, properties);
+                beans.getBeanProvider(SeckillReservationStore.class), manager, properties, orders);
         ReflectionTestUtils.setField(publisher, "baseMapper", shopVouchers);
         return publisher;
     }

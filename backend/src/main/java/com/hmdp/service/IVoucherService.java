@@ -13,6 +13,19 @@ import com.baomidou.mybatisplus.extension.service.IService;
 public interface IVoucherService extends IService<Voucher> {
 
     /**
+     * 为用户直接创建上架普通券的未支付订单，不预占库存、不发送 MQ。
+     * 普通券没有独立库存，同一用户同券已有订单时返回原订单号，包括券后来下架的情况。
+     * 在独立短事务中锁定券记录后查重和插单，提交成功后才返回结果。
+     *
+     * @param userId 当前登录用户的正数编号，由后端鉴权上下文取得
+     * @param voucherId 要购买的正数券编号，只接受 type=0 的普通券
+     * @return 成功时 data 为字符串订单号；券不存在、类型不符或未上架且没有原订单时返回失败
+     * @throws IllegalArgumentException 用户或券编号为空、非正数
+     * @throws IllegalStateException 已有外层事务、线程中断或订单插入没有成功写入一行
+     */
+    Result purchaseVoucher(Long userId, Long voucherId);
+
+    /**
      * 查询店铺可展示的优惠券及秒杀库存信息。
      *
      * @param shopId 店铺编号

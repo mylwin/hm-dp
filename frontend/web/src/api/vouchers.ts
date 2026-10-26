@@ -19,6 +19,11 @@ export function seckill(id: Id): Promise<Id> {
 // 当前仅使用新链路；旧页面分支保留作参考，不再由环境变量启用。
 export const reliableSeckillEnabled = true;
 
+// 普通券由后端同步创建订单；重复提交同一用户同券会找回原订单号。
+export function purchaseOrdinaryVoucher(voucherId: Id): Promise<string> {
+  return request(`/voucher/${encodeURIComponent(voucherId)}/purchase`, { method: 'POST' });
+}
+
 export type SeckillRequestResult = {
   orderId: string;
   requestId: string;

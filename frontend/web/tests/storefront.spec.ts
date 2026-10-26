@@ -3,8 +3,9 @@ import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import preview from '../src/mocks/preview-data.json' with { type: 'json' };
 
-async function mockApi(page: Page, options: { expired?: boolean; fail?: boolean; empty?: boolean } = {}) {
+async function mockApi(page: Page, options: { expired?: boolean; fail?: boolean; empty?: boolean; ordinary?: boolean; failOrdinaryOnce?: boolean } = {}) {
   const calls: { path: string; method: string; token?: string; query: string }[] = [];
+  let ordinaryAttempts = 0;
   await page.route(isBackendApi, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -18,7 +19,13 @@ async function mockApi(page: Page, options: { expired?: boolean; fail?: boolean;
     else if (path === '/shop/1') data = preview.shops[0];
     else if (path.startsWith('/shop/of/')) data = options.empty ? [] : preview.shops.slice(0, 5);
     else if (path === '/blog/hot') data = preview.blogs;
-    else if (path === '/voucher/list/1') data = [{ ...preview.vouchers[0], id: 99, type: 1, stock: 3, beginTime: '2020-01-01T00:00:00', endTime: '2099-01-01T00:00:00' }, { ...preview.vouchers[0], id: 100, type: 1, stock: 0 }, { ...preview.vouchers[0], id: 101, type: 1, endTime: '2020-01-01T00:00:00' }, { ...preview.vouchers[0], id: 102, type: 1, beginTime: '2099-01-01T00:00:00' }];
+    else if (path === '/voucher/list/1') data = options.ordinary ? [{ ...preview.vouchers[0], id: 99, type: 0, status: 1 }] : [{ ...preview.vouchers[0], id: 99, type: 1, stock: 3, beginTime: '2020-01-01T00:00:00', endTime: '2099-01-01T00:00:00' }, { ...preview.vouchers[0], id: 100, type: 1, stock: 0 }, { ...preview.vouchers[0], id: 101, type: 1, endTime: '2020-01-01T00:00:00' }, { ...preview.vouchers[0], id: 102, type: 1, beginTime: '2099-01-01T00:00:00' }];
+    else if (path === '/voucher/99/purchase') {
+      ordinaryAttempts++;
+      if (options.failOrdinaryOnce && ordinaryAttempts === 1) return route.abort('timedout');
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      data = '856725678012345678';
+    }
     else if (path === '/voucher-order/reliable/seckill/99') {
       await new Promise((resolve) => setTimeout(resolve, 120));
       const { requestId } = request.postDataJSON() as { requestId: string };
@@ -145,4 +152,37 @@ test('后端错误显示重试入口；401 清理令牌并引导登录', async (
   await page.getByRole('button', { name: '确认抢购', exact: true }).click();
   await expect(page.getByLabel('手机号', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem('token'))).toBeNull();
+});
+
+
+test('普通券确认后直接购买并显示完整订单号，不调用秒杀接口', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('token', 'contract-test-token'));
+  const calls = await mockApi(page, { ordinary: true });
+  await page.goto('/shops/1?preview=0');
+  await expect(page.locator('.account-button')).toContainText('接口验证用户');
+  await page.getByRole('button', { name: '立即购买', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '确认购买', exact: true })).toBeVisible();
+  expect(calls.filter((call) => call.path.endsWith('/purchase'))).toHaveLength(0);
+  await page.getByRole('button', { name: '确认购买', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '订单已确认', exact: true })).toBeVisible();
+  await expect(page.locator('.order-id')).toHaveText('856725678012345678');
+  expect(calls.filter((call) => call.path === '/voucher/99/purchase')).toEqual([
+    { path: '/voucher/99/purchase', method: 'POST', token: 'contract-test-token', query: '' },
+  ]);
+  expect(calls.some((call) => call.path.startsWith('/voucher-order/'))).toBe(false);
+});
+
+test('普通券提交结果未知可重试同一购买入口，不误报购买成功', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('token', 'contract-test-token'));
+  const calls = await mockApi(page, { ordinary: true, failOrdinaryOnce: true });
+  await page.goto('/shops/1?preview=0');
+  await expect(page.locator('.account-button')).toContainText('接口验证用户');
+  await page.getByRole('button', { name: '立即购买', exact: true }).click();
+  await page.getByRole('button', { name: '确认购买', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('可重试购买找回原订单');
+  await expect(page.getByRole('heading', { name: '订单已确认', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '确认购买', exact: true }).click();
+  await expect(page.locator('.order-id')).toHaveText('856725678012345678');
+  expect(calls.filter((call) => call.path === '/voucher/99/purchase')).toHaveLength(2);
+  expect(calls.some((call) => call.path.startsWith('/voucher-order/'))).toBe(false);
 });

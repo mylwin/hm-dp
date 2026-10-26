@@ -18,6 +18,9 @@
 
 ## 当前秒杀入口：新链路
 
+普通券已补充直接数据库购买：上架普通券点击“立即购买”，确认后创建未支付订单，重复购买返回已有编号。
+接口及限制见 [普通券购买说明](docs/architecture/ORDINARY_VOUCHER_PURCHASE.md)。
+
 理解整体业务先读 [RocketMQ 秒杀订单总设计](docs/architecture/ROCKETMQ_ORDER_DESIGN.md)：
 按发券、受理、建单、收尾和恢复解释数据库、Redis、状态、流程时序及并发场景，无需按五个阶段逐份拼接。
 
