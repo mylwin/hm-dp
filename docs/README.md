@@ -10,6 +10,7 @@
 
 ### 订单优化
 
+- [先读总设计：完整业务、状态设计、数据库、Redis、流程时序与 44 个并发故障场景](architecture/ROCKETMQ_ORDER_DESIGN.md)
 - [订单 RocketMQ 第一阶段：客户端接入与收发验证](optimization/order/ROCKETMQ_PHASE1.md)
 - [订单 RocketMQ 第二阶段：可靠受理、预占与 Outbox](optimization/order/ROCKETMQ_PHASE2.md)
 - [订单 RocketMQ 第二阶段图解与复盘：参考来源、架构、表职责、Redis 键值示例与故障恢复](optimization/order/ROCKETMQ_PHASE2_REVIEW.md)
@@ -33,6 +34,7 @@
 
 ## 架构与项目结构
 
+- [RocketMQ 秒杀订单整体设计](architecture/ROCKETMQ_ORDER_DESIGN.md)
 - [项目结构与文件迁移对照](architecture/STRUCTURE.md)
 - [项目架构说明](项目架构说明.md)
 - [项目架构源文件](项目架构.drawio)

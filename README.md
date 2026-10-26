@@ -18,6 +18,9 @@
 
 ## 当前秒杀入口：新链路
 
+理解整体业务先读 [RocketMQ 秒杀订单总设计](docs/architecture/ROCKETMQ_ORDER_DESIGN.md)：
+按发券、受理、建单、收尾和恢复解释数据库、Redis、状态、流程时序及并发场景，无需按五个阶段逐份拼接。
+
 当前 React 页面固定使用 `/voucher-order/reliable`，旧 Controller 和旧 Stream 消费者已停止注册，
 旧代码与历史数据保留。新券通过 `POST /voucher/seckill` 自动准备 Redis 后开放购买。
 API 实例启动会检查新管道开关完整性；`SECKILL_ACCEPTING_REQUESTS=false` 可暂停提交，原请求查询和后台收尾继续。

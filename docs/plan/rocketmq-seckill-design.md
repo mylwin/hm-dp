@@ -1,5 +1,7 @@
 # RocketMQ 秒杀订单迁移方案
 
+当前业务全貌请先读 [秒杀订单整体设计](../architecture/ROCKETMQ_ORDER_DESIGN.md)，统一解释状态、数据库、Redis、流程时序及并发场景；本文保留早期方案和阶段背景。
+
 > **2026-10-25 最新范围**：用户明确后续只使用新路径，不维护旧链路。第五阶段停用旧入口和消费者，取消旧 Stream 排空、历史券接管及回退旧链路实现；已完成范围和未执行的故障演练见 [第五阶段说明](../optimization/order/ROCKETMQ_PHASE5.md)。下文迁移步骤为早期完整方案，不代表本轮仍需实施。
 
 当前进度：2026-10-25 [第四阶段代码实现](../optimization/order/ROCKETMQ_PHASE4.md) 已补齐自动发布、
