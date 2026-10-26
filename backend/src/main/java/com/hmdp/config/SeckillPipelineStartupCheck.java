@@ -27,7 +27,9 @@ public class SeckillPipelineStartupCheck implements SmartInitializingSingleton {
      */
     @Override
     public void afterSingletonsInstantiated() {
+        // 未开放秒杀 API 的实例无需同时启用全部订单组件。
         if (!seckillOrderProperties.isReliableApiEnabled()) return;
+        // API 已开放时，以下任一组件关闭都拒绝启动，避免受理后无人投递、建单或收尾。
         if (!seckillOrderProperties.isReliableComponentsEnabled() || !rocketMqProperties.isEnabled() || !orderOutboxProperties.isEnabled()
                 || !orderConsumerProperties.isEnabled() || !orderConsumerProperties.isDeadLetterEnabled() || !seckillMaintenanceProperties.isEnabled()) {
             throw new IllegalStateException("秒杀 API 要求启用可靠组件、MQ、Outbox、订单消费、死信隔离和维护调度");

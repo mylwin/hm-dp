@@ -34,7 +34,9 @@ public class VoucherController {
     @PostMapping("/{voucherId}/purchase")
     public ResponseEntity<Result> purchaseVoucher(@PathVariable("voucherId") Long voucherId) {
         UserDTO currentUser = UserContext.getUser();
-        if (currentUser == null) return ResponseEntity.status(401).body(Result.fail("请先登录"));
+        if (currentUser == null) {
+            return ResponseEntity.status(401).body(Result.fail("请先登录"));
+        }
         try {
             return ResponseEntity.ok(voucherService.purchaseVoucher(currentUser.getId(), voucherId));
         } catch (IllegalArgumentException invalid) {

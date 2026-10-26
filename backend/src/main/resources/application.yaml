@@ -97,15 +97,15 @@ hmdp:
     transaction-timeout-seconds: ${SECKILL_TRANSACTION_TIMEOUT_SECONDS:5}  # 事务超时秒数
     maintenance:
       enabled: ${SECKILL_MAINTENANCE_ENABLED:true} # 启用前先执行第四阶段两份迁移
-      operations-enabled: ${SECKILL_OPERATIONS_ENABLED:false}
-      operations-token: ${SECKILL_OPERATIONS_TOKEN:}
-      batch-size: ${SECKILL_MAINTENANCE_BATCH_SIZE:20}
-      poll-interval-ms: ${SECKILL_MAINTENANCE_INTERVAL_MS:5000}
-      stale-seconds: ${SECKILL_RECOVERY_STALE_SECONDS:60}
-      recovery-retry-seconds: ${SECKILL_RECOVERY_RETRY_SECONDS:60}
-      lease-ms: ${SECKILL_MAINTENANCE_LEASE_MS:30000}
-      alert-age-seconds: ${SECKILL_ALERT_AGE_SECONDS:120}
-      alert-attempts: ${SECKILL_ALERT_ATTEMPTS:10}
+      operations-enabled: ${SECKILL_OPERATIONS_ENABLED:false}  # 是否开放秒杀运维接口；调用时须登录并携带独立运维令牌
+      operations-token: ${SECKILL_OPERATIONS_TOKEN:}  # 独立运维令牌，开启运维接口时须配置至少 32 个字符
+      batch-size: ${SECKILL_MAINTENANCE_BATCH_SIZE:20}  # 单轮上限：确认与释放任务合计领取数、待发布活动检查数、停滞请求检查数分别受限
+      poll-interval-ms: ${SECKILL_MAINTENANCE_INTERVAL_MS:5000}  # 确认释放与发布恢复、请求恢复各轮执行结束后的等待时间，单位毫秒
+      stale-seconds: ${SECKILL_RECOVERY_STALE_SECONDS:60}  # PREPARING/ACCEPTED 请求无进展达到此秒数后检查，不会仅因超时自动关闭
+      recovery-retry-seconds: ${SECKILL_RECOVERY_RETRY_SECONDS:60}  # 同一活动或请求两次恢复尝试之间的最短等待时间，单位秒
+      lease-ms: ${SECKILL_MAINTENANCE_LEASE_MS:30000}  # 确认或释放任务领取后的独占执行时限，单位毫秒；到期可由其他执行者接管
+      alert-age-seconds: ${SECKILL_ALERT_AGE_SECONDS:120}  # 未完成任务、请求或待发布活动的最老等待时间达到此秒数时输出告警日志
+      alert-attempts: ${SECKILL_ALERT_ATTEMPTS:10}  # 未完成 Outbox 事件的领取次数达到此值时输出告警日志，仍保留重试
   cache:
     # 每实例的互斥缓存回源并发上限，启动时生效；不应占满数据库连接池。
     max-concurrent-fallbacks: ${CACHE_MAX_CONCURRENT_FALLBACKS:10}

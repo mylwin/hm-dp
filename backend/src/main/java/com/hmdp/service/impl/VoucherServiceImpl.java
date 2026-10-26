@@ -57,17 +57,27 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         requireStandaloneCall();
         return transaction().execute(status -> {
             Voucher voucher = getBaseMapper().lockForPurchase(voucherId);
-            if (voucher == null) return Result.fail("优惠券不存在");
+            if (voucher == null) {
+                return Result.fail("优惠券不存在");
+            }
             if (!Integer.valueOf(0).equals(voucher.getType())) {
                 return Result.fail("该优惠券不是普通券，请使用秒杀抢购入口");
             }
             // 券锁覆盖查重、插入和提交；响应丢失后的重试即使遇到下架，也能找回原订单。
             VoucherOrder existingOrder = voucherOrders.findUserVoucherOrder(userId, voucherId);
-            if (existingOrder != null) return Result.ok(existingOrder.getId().toString());
-            if (!Integer.valueOf(1).equals(voucher.getStatus())) return Result.fail("优惠券暂不可购买");
+            // 已有同券订单时返回原编号，避免重复插单。
+            if (existingOrder != null) {
+                return Result.ok(existingOrder.getId().toString());
+            }
+            // 没有原订单时，只允许购买上架的普通券。
+            if (!Integer.valueOf(1).equals(voucher.getStatus())) {
+                return Result.fail("优惠券暂不可购买");
+            }
             // 使用 MyBatis-Plus 本地编号生成器，普通购买不调用 Redis ID 或秒杀预占组件。
             VoucherOrder newOrder = new VoucherOrder().setId(IdWorker.getId()).setUserId(userId).setVoucherId(voucherId);
-            if (voucherOrders.insert(newOrder) != 1) throw new IllegalStateException("普通券订单保存失败");
+            if (voucherOrders.insert(newOrder) != 1) {
+                throw new IllegalStateException("普通券订单保存失败");
+            }
             return Result.ok(newOrder.getId().toString());
         });
     }
