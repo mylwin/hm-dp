@@ -24,7 +24,7 @@ case "${1:-up}" in
                 printf 'HMDP_JWT_SECRET=%s\n' "$(openssl rand -hex 32)"
                 printf 'HMDP_HTTP_PORT=8080\nHMDP_BIND_ADDRESS=127.0.0.1\nHMDP_SECKILL_ENABLED=false\n'
             } > "$ENV_FILE"
-            echo "已生成 $ENV_FILE，请妥善保管；修改后重新执行此命令。"
+            echo "已生成 ${ENV_FILE}，请妥善保管；修改后重新执行此命令。"
         fi
         if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build --wait; then
             echo '启动失败：请查看上面的构建或启动错误；下面是容器状态和最近日志。' >&2

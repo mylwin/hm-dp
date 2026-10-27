@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>用户抢购流程 · 黑马点评</title>
+<style>
+:root{color-scheme:light dark;--bg:#f5f4ef;--paper:#fffefa;--ink:#18332d;--muted:#52645e;--line:#ccd6cd;--accent:#17634d;--soft:#e9f0e8;--warn:#85521b}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;font-size:16px;line-height:1.75}main{max-width:1120px;margin:auto;padding:55px 32px 72px}a{color:var(--accent);text-underline-offset:4px}header{border-bottom:1px solid var(--line);padding-bottom:28px}.eyebrow{font:12px ui-monospace,monospace;letter-spacing:.14em;color:var(--muted)}h1{font-size:clamp(30px,4vw,46px);letter-spacing:-.035em;line-height:1.2;margin:15px 0 18px;font-weight:650}header p{max-width:770px;margin:0;color:var(--muted)}.map{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:32px 0}.card{display:flex;flex-direction:column;text-decoration:none;background:var(--paper);padding:25px 27px 23px;border:1px solid var(--line);border-radius:5px;transition:border-color .15s,transform .15s;color:var(--ink)}.card:hover{border-color:var(--accent);transform:translateY(-2px)}.card:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.num{font:14px ui-monospace,monospace;color:var(--accent)}.card h2{font-size:22px;line-height:1.45;margin:11px 0}.card p{font-size:14px;color:var(--muted);margin:0 0 19px}.open{margin-top:auto;font-size:14px;font-weight:650;color:var(--accent)}.concepts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;background:var(--soft);padding:24px 28px;margin:28px 0}.concepts h3{font-size:16px;margin:0 0 7px}.concepts p{font-size:14px;margin:0;color:var(--muted)}.note{border-left:3px solid var(--warn);padding-left:18px;margin:28px 0;color:var(--muted)}.note strong{color:var(--warn)}.links{display:flex;gap:24px;flex-wrap:wrap;margin-top:30px}footer{font-size:12px;color:var(--muted);border-top:1px solid var(--line);margin-top:34px;padding-top:18px}code{font-size:.9em;overflow-wrap:anywhere} @media(prefers-color-scheme:dark){:root{--bg:#15221f;--paper:#1b2d27;--ink:#e4eee6;--muted:#afc4b8;--line:#385046;--accent:#91cfaf;--soft:#21392e;--warn:#e4b77a}}@media(max-width:700px){main{padding:32px 20px 50px}.map,.concepts{grid-template-columns:1fr}.card{padding:23px}.concepts{gap:20px;padding:22px}}
+</style>
+</head>
+<body><main>
+<header><div class="eyebrow">HM-DP / SOURCE-BACKED FLOW / 2026.10.26</div><h1>用户抢购，直到结果确定</h1><p>从用户点击到预占、可靠投递、异步建单和库存收尾。按下面顺序阅读四张图：先看业务分支，再看提交顺序，最后用一次超时理解恢复机制。</p></header>
+<section class="map" aria-label="四张流程与时序图">
+<a class="card" href="acceptance/acceptance.html"><span class="num">01 / 流程图</span><h2>用户提交与可靠受理</h2><p>登录与保存 requestId → 请求账本 → 活动及请求锁 → Redis 预占 → ACCEPTED 与 Outbox 一起提交。旁支解释入口拒绝、售罄、重复抢购与结果未知。</p><span class="open">打开受理流程 →</span></a>
+<a class="card" href="async-order/async-order.html"><span class="num">02 / 流程图</span><h2>异步建单与失败收尾</h2><p>Outbox 租约 → MQ 发送 → 消费核对 → 数据库扣库建单。串联技术重试、协议隔离、死信、关闭前重查以及预占确认／释放。</p><span class="open">打开建单流程 →</span></a>
+<a class="card" href="success-sequence/success-sequence.html"><span class="num">03 / 时序图</span><h2>成功路径的三个提交点</h2><p>用页面、受理服务、MySQL、Redis、后台和 MQ 的消息顺序，理解什么先提交、什么时候 ACK，以及用户何时可以看到建单成功。</p><span class="open">打开成功时序 →</span></a>
+<a class="card" href="timeout-recovery/timeout-recovery.html"><span class="num">04 / 时序图</span><h2>Redis 已扣库存，响应却丢了</h2><p>为什么超时不能直接补库存？原账本如何留下恢复依据？同 orderId 再执行 Lua 为什么不会重复扣减？这张图用一条完整恢复路径回答。</p><span class="open">打开超时恢复 →</span></a>
+</section>
+<section class="concepts" aria-label="三个结果的区别"><div><h3>ACCEPTED · 已受理</h3><p>预占与待发事件已持久化。继续查询，订单可能还未创建。</p></div><div><h3>SUCCEEDED · 建单成功</h3><p>数据库订单已提交，尚未支付。预占确认任务可以稍后完成。</p></div><div><h3>CLOSED · 请求已关闭</h3><p>确认无原订单后关闭。释放任务另行执行，关闭不代表库存已经回补。</p></div></section>
+<p class="note"><strong>读失败分支时先判断：结果已明确，还是仍待确认。</strong><br>明确售罄、未开始、已结束、重复购买落 REJECTED；Redis 超时、网络错误、MQ 重试、暂时 404 都不能单独证明抢购失败。没有最终结果时保留原请求编号。</p>
+<nav class="links" aria-label="相关讲解"><a href="README.md">完整讲解：24 类失败与并发案例</a><a href="verification.md">逐图规范、哈希与浏览器检查记录</a><a href="../../README.md">项目文档索引</a></nav>
+<footer>基于仓库提交 <code>3d27bf01b7f7a32b89ebed031f496df446ae6eb7</code>，按当前可靠秒杀代码绘制；未改动业务代码。图内附源码引用，可切换深浅主题并使用查看器导出。支付、核销和退款不在本次范围内。</footer>
+</main></body></html>

@@ -42,6 +42,8 @@
 3. **消息允许重发，业务不能重复生效。** 通过 Outbox 保留待发送事项，通过账本状态、订单主键及业务唯一索引实现幂等。
 4. **失败后有人继续做。** 后台执行确认/释放，继续未完成的受理、投递和发布；不能只在日志里写“失败了”。
 
+**补充**：Outbox 的设计思想介绍 https://chatgpt.com/share/6adef307-3a18-83ea-82f2-ae971551d7f4
+
 ### 1.2 原方案变化的关键点
 
 旧实现把 Redis 扣库存、记录已购用户和 `XADD` 写 Stream 放在同一个 Lua 中，Redis 内的这几步可以连续执行。
@@ -597,10 +599,11 @@ sequenceDiagram
     participant Accept as 受理服务
     participant DB as MySQL
     participant Redis as Redis
-    participant Dispatch as Outbox 投递器
+    participant Dispatch as Outbox投递器
     participant MQ as RocketMQ
-    participant Create as 建单消费者
+    participant CreateConsumer as 建单消费者
     participant Finish as 预占收尾任务
+
     User->>User: 保存本次 requestId
     User->>Accept: 提交抢购或重试原请求
     Accept->>DB: 事务一：找回或登记 PREPARING
@@ -610,17 +613,21 @@ sequenceDiagram
     Redis-->>Accept: RESERVED
     Accept->>DB: ACCEPTED + CREATE_ORDER，一起提交
     Accept-->>User: 最新持久化状态，不保证已建单
+
     Dispatch->>DB: 领取 CREATE_ORDER 租约并提交
     Dispatch->>MQ: 在数据库事务外发送原事件
     MQ-->>Dispatch: 发送回执
     Dispatch->>DB: 当前有效租约登记 SENT
-    MQ->>Create: 投递或重复投递建单事件
-    Create->>DB: 同事务扣库存、插订单、SUCCEEDED、确认事项
-    DB-->>Create: 提交成功
-    Create-->>MQ: ACK
+
+    MQ-->>CreateConsumer: 投递或重复投递建单事件
+    CreateConsumer->>DB: 同事务扣库存、插订单、SUCCEEDED、确认事项
+    DB-->>CreateConsumer: 提交成功
+    CreateConsumer-->>MQ: ACK
+
     Finish->>DB: 领取确认事项，核对成功订单
     Finish->>Redis: 原预占改为 CONFIRMED，不再扣库
     Finish->>DB: 当前租约登记本地事项完成
+
     User->>Accept: 按原 requestId 查询
     Accept->>DB: 仅查询该用户自己的账本
     Accept-->>User: SUCCEEDED，显示订单创建成功

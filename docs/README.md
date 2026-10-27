@@ -3,6 +3,10 @@
 项目说明、设计方案、优化记录和前端资料统一放在 `docs/`，按主题归类。
 项目根目录保留 `README.md` 作为使用入口，代理规则文件保留在根目录。
 
+## 接口文档
+
+- [后端 HTTP 接口文档](api/BACKEND_API.md)
+
 ## 项目优化
 
 - [项目优化建议](项目优化建议.md)
@@ -34,6 +38,7 @@
 
 ## 架构与项目结构
 
+- [用户抢购完整图解：受理、异步建单、失败补偿与两张时序图](architecture/seckill-purchase-20261026-162832/README.md)（[交互图解导航](architecture/seckill-purchase-20261026-162832/index.html)）
 - [普通优惠券购买：直接数据库建单、重复提交与验证边界](architecture/ORDINARY_VOUCHER_PURCHASE.md)
 - [RocketMQ 秒杀订单整体设计](architecture/ROCKETMQ_ORDER_DESIGN.md)
 - [项目结构与文件迁移对照](architecture/STRUCTURE.md)
