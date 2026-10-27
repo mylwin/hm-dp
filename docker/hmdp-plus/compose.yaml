@@ -1,0 +1,87 @@
+name: hmdp-plus
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:?请配置 MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-hm-dp}
+      TZ: Asia/Shanghai
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../../backend/src/main/resources/db/hmdp.sql:/docker-entrypoint-initdb.d/01-hmdp.sql:ro
+      - ../../backend/src/main/resources/db/migration/V20261024_02__seckill_request_outbox.sql:/docker-entrypoint-initdb.d/02-outbox.sql:ro
+      - ../../backend/src/main/resources/db/migration/V20261024_03__seckill_order_unique.sql:/docker-entrypoint-initdb.d/03-order-unique.sql:ro
+      - ../../backend/src/main/resources/db/migration/V20261025_04__seckill_campaign_publication.sql:/docker-entrypoint-initdb.d/04-campaign.sql:ro
+      - ../../backend/src/main/resources/db/migration/V20261025_05__seckill_maintenance.sql:/docker-entrypoint-initdb.d/05-maintenance.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysql --protocol=TCP -h 127.0.0.1 -uroot -D \"$$MYSQL_DATABASE\" -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请配置 REDIS_PASSWORD}
+    command: ["/bin/sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis-data:/data
+      - ../redis/healthcheck.sh:/usr/local/bin/hmdp-redis-healthcheck:ro
+    healthcheck:
+      test: ["CMD", "/bin/sh", "/usr/local/bin/hmdp-redis-healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  backend:
+    build: ../../backend
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-hm-dp}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请配置 MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请配置 REDIS_PASSWORD}
+      HMDP_JWT_SECRET: ${HMDP_JWT_SECRET:?请配置 HMDP_JWT_SECRET}
+      JWT_REFRESH_COOKIE_SECURE: ${JWT_REFRESH_COOKIE_SECURE:-false}
+      DEV_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:-not-configured}
+      DEV_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:-not-configured}
+      DEV_BUCKET_NAME: ${OSS_BUCKET_NAME:-not-configured}
+      ROCKETMQ_NAMESERVER: ${ROCKETMQ_NAMESERVER:-10.211.55.9:9876}
+      ROCKETMQ_ACCESS_KEY: ${ROCKETMQ_ACCESS_KEY:-}
+      ROCKETMQ_SECRET_KEY: ${ROCKETMQ_SECRET_KEY:-}
+      ROCKETMQ_ENABLED: ${HMDP_SECKILL_ENABLED:-false}
+      ORDER_OUTBOX_ENABLED: ${HMDP_SECKILL_ENABLED:-false}
+      ORDER_CONSUMER_ENABLED: ${HMDP_SECKILL_ENABLED:-false}
+      ORDER_DEAD_LETTER_ENABLED: ${HMDP_SECKILL_ENABLED:-false}
+      SECKILL_RELIABLE_COMPONENTS_ENABLED: ${HMDP_SECKILL_ENABLED:-false}
+      SECKILL_RELIABLE_API_ENABLED: ${HMDP_SECKILL_ENABLED:-false}
+      SECKILL_MAINTENANCE_ENABLED: ${HMDP_SECKILL_ENABLED:-false}
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8081/shop-type/list"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+  frontend:
+    build: ../../frontend/web
+    restart: unless-stopped
+    ports:
+      - "${HMDP_BIND_ADDRESS:-127.0.0.1}:${HMDP_HTTP_PORT:-8080}:80"
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+volumes:
+  mysql-data:
+  redis-data:

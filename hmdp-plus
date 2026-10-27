@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+COMPOSE_FILE="$PROJECT_DIR/docker/hmdp-plus/compose.yaml"
+ENV_FILE="$PROJECT_DIR/.env"
+
+if ! docker compose version >/dev/null 2>&1; then
+    echo '启动失败：需要安装 Docker 和 Docker Compose。' >&2
+    exit 1
+fi
+
+case "${1:-up}" in
+    up)
+        if [ ! -f "$ENV_FILE" ]; then
+            if ! command -v openssl >/dev/null 2>&1; then
+                echo '启动失败：首次启动需要 openssl 生成密码，也可以自行创建项目根目录 .env。' >&2
+                exit 1
+            fi
+            umask 077
+            {
+                printf 'MYSQL_DATABASE=hm-dp\n'
+                printf 'MYSQL_PASSWORD=%s\n' "$(openssl rand -hex 24)"
+                printf 'REDIS_PASSWORD=%s\n' "$(openssl rand -hex 24)"
+                printf 'HMDP_JWT_SECRET=%s\n' "$(openssl rand -hex 32)"
+                printf 'HMDP_HTTP_PORT=8080\nHMDP_BIND_ADDRESS=127.0.0.1\nHMDP_SECKILL_ENABLED=false\n'
+            } > "$ENV_FILE"
+            echo "已生成 $ENV_FILE，请妥善保管；修改后重新执行此命令。"
+        fi
+        if ! docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build --wait; then
+            echo '启动失败：请查看上面的构建或启动错误；下面是容器状态和最近日志。' >&2
+            docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -a >&2 || true
+            docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs --no-color --tail 30 >&2 || true
+            echo '完整日志：./hmdp-plus logs' >&2
+            exit 1
+        fi
+        if frontend_binding=$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" port frontend 80); then
+            frontend_port=${frontend_binding##*:}
+            frontend_host=${frontend_binding%:*}
+            case "$frontend_host" in
+                0.0.0.0|'[::]'|'::') frontend_host=127.0.0.1 ;;
+            esac
+            echo '启动成功：前端、后端、MySQL 和 Redis 均已通过健康检查。'
+            echo "前端地址：http://$frontend_host:$frontend_port/"
+            echo "后端 API 地址：http://$frontend_host:$frontend_port/api/（由前端代理）"
+        else
+            echo '启动成功，但无法读取前端端口；请运行 ./hmdp-plus ps 查看端口映射。' >&2
+        fi
+        echo '秒杀和图片上传需要额外配置，详见 docs/frontend/DOCKER_DEPLOY.md。'
+        ;;
+    down|stop|ps|logs)
+        action=$1
+        shift
+        docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$action" "$@"
+        ;;
+    *)
+        echo '用法：./hmdp-plus [up|down|stop|ps|logs]；down 保留数据卷。' >&2
+        exit 2
+        ;;
+esac

@@ -43,6 +43,8 @@
 
 ## 前端
 
+- [hmdp-plus 前后端 Docker 部署](frontend/DOCKER_DEPLOY.md)
+
 - [前端开发、接口与部署说明](frontend/README.md)
 - [秒杀维护页：本地开关、运维接口和验证说明](frontend/SECKILL_MAINTENANCE.md)
 - [页面迁移与接口覆盖](frontend/MIGRATION.md)

@@ -167,7 +167,13 @@ HTTPS 部署设置 `JWT_REFRESH_COOKIE_SECURE=true`；本地 HTTP 开发保持�
 验证码仍仅输出到开发日志，尚未对接短信平台；有效期两分钟，60 秒内不能重复发送，
 验证成功即原子消费，连续失败五次锁定十分钟。
 
-## 一键启动
+## 完整 Docker 部署
+
+在项目根目录运行 `./hmdp-plus`，构建并启动前端、后端、MySQL 和 Redis。
+首次启动自动初始化数据库；秒杀及图片上传需要额外配置。详细说明见
+[Docker 部署指南](docs/frontend/DOCKER_DEPLOY.md)。
+
+## 本地依赖一键启动
 
 先启动 OrbStack 或 Docker Desktop，确保 `docker compose version` 可用。
 在项目根目录执行：
