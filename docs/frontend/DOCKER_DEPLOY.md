@@ -1,6 +1,6 @@
 # hmdp-plus Docker 部署
 
-在项目根目录执行 `./hmdp-plus`，首次构建需要 Docker Compose、openssl 和镜像及依赖下载网络。脚本首次创建根目录 `.env`，生成 MySQL、Redis 和 JWT 的独立随机密钥；该文件已被 Git 忽略，应保留并备份。已有 `.env` 不会被覆盖：必须自行补齐 `MYSQL_PASSWORD`、`REDIS_PASSWORD` 和至少 32 字节的 `HMDP_JWT_SECRET`。根目录的原本地依赖 Compose 也读取该文件，修改共享变量会影响它的配置。
+在项目根目录启动：macOS 或 Linux 执行 `./hmdp-plus`；Windows 在 PowerShell 或命令提示符执行 `.\hmdp-plus.cmd`。首次构建需要 Docker Compose 和镜像及依赖下载网络；macOS 或 Linux 首次生成配置还需 openssl，Windows 使用系统加密组件。脚本首次创建根目录 `.env`，生成 MySQL、Redis 和 JWT 的独立随机密钥；该文件已被 Git 忽略，应保留并备份。已有 `.env` 不会被覆盖：必须自行补齐 `MYSQL_PASSWORD`、`REDIS_PASSWORD` 和至少 32 字节的 `HMDP_JWT_SECRET`。根目录的原本地依赖 Compose 也读取该文件，修改共享变量会影响它的配置。
 
 脚本等待四个容器的健康检查，成功后显示前端地址和通过前端代理访问的后端 API 地址；默认分别为 `http://127.0.0.1:8080/` 和 `http://127.0.0.1:8080/api/`。失败时显示 Compose 错误、容器状态和最近日志，详细日志可用 `./hmdp-plus logs` 查看。设置 `HMDP_HTTP_PORT` 改端口，`HMDP_BIND_ADDRESS=0.0.0.0` 允许外部访问；对外发布应通过 HTTPS 反向代理，并设置 `JWT_REFRESH_COOKIE_SECURE=true`。后端、MySQL 和 Redis 不直接向宿主机暴露端口。容器独立于原本地依赖 Compose，使用独立数据卷。
 
@@ -14,7 +14,7 @@
 
 ## 部署后操作
 
-以下命令均在项目根目录执行。
+以下命令均在项目根目录执行。Windows 将命令中的 `./hmdp-plus` 替换为 `.\hmdp-plus.cmd`；例如查看验证码用 `.\hmdp-plus.cmd logs -f backend`，停止用 `.\hmdp-plus.cmd stop`。
 
 1. 查看服务状态：
 

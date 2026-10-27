@@ -169,7 +169,7 @@ HTTPS 部署设置 `JWT_REFRESH_COOKIE_SECURE=true`；本地 HTTP 开发保持�
 
 ## 完整 Docker 部署
 
-在项目根目录运行 `./hmdp-plus`，构建并启动前端、后端、MySQL 和 Redis。
+在项目根目录运行 `./hmdp-plus`（Windows 使用 `.\hmdp-plus.cmd`），构建并启动前端、后端、MySQL 和 Redis。
 首次启动自动初始化数据库；秒杀及图片上传需要额外配置。详细说明见
 [Docker 部署指南](docs/frontend/DOCKER_DEPLOY.md)。
 
