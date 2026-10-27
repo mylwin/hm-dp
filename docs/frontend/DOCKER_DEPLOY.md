@@ -14,28 +14,52 @@
 
 ## 部署后操作
 
-以下命令均在项目根目录执行。Windows 将命令中的 `./hmdp-plus` 替换为 `.\hmdp-plus.cmd`；例如查看验证码用 `.\hmdp-plus.cmd logs -f backend`，停止用 `.\hmdp-plus.cmd stop`。
+以下命令均在项目根目录执行。验证码有效期为两分钟，当前尚未发送短信；查看日志获取验证码仅适合本地开发和演示。
 
-1. 查看服务状态：
+### Windows（PowerShell 或命令提示符）
 
-   ```bash
-   ./hmdp-plus ps
-   ```
+先启动 Docker Desktop，再执行：
 
-2. 本地登录时，在另一个终端持续查看后端日志，再在页面点击发送验证码：
+```powershell
+# 构建并启动服务
+.\hmdp-plus.cmd
 
-   ```bash
-   ./hmdp-plus logs -f backend
-   ```
+# 查看服务状态
+.\hmdp-plus.cmd ps
 
-   验证码显示在后端日志中，有效期为两分钟；项目尚未发送短信，此方式仅适用于本地开发和演示。按 `Ctrl+C` 退出日志查看，不会停止服务。
+# 实时查看后端日志及登录验证码
+.\hmdp-plus.cmd logs -f backend
 
-3. 停止全部容器，保留数据库和 Redis 数据：
+# 停止容器，保留数据库和 Redis 数据
+.\hmdp-plus.cmd stop
 
-   ```bash
-   ./hmdp-plus stop
-   ```
+# 删除容器和网络，保留数据卷
+.\hmdp-plus.cmd down
+```
 
-4. 再次启动时执行 `./hmdp-plus`，脚本会重新构建并复用数据。若要删除容器和网络但保留数据卷，执行 `./hmdp-plus down`。
+查看日志时按 `Ctrl+C` 退出，不会停止服务。再次执行 `.\hmdp-plus.cmd` 可重新构建并启动。
+
+### macOS 和 Linux
+
+先启动 OrbStack 或 Docker，再执行：
+
+```bash
+# 构建并启动服务
+./hmdp-plus
+
+# 查看服务状态
+./hmdp-plus ps
+
+# 实时查看后端日志及登录验证码
+./hmdp-plus logs -f backend
+
+# 停止容器，保留数据库和 Redis 数据
+./hmdp-plus stop
+
+# 删除容器和网络，保留数据卷
+./hmdp-plus down
+```
+
+查看日志时按 `Ctrl+C` 退出，不会停止服务。再次执行 `./hmdp-plus` 可重新构建并启动。
 
 不要随意删除 `.env` 或数据卷：重新生成 JWT 密钥会使已签发的访问令牌失效；删除数据卷会清空数据库和 Redis。
